@@ -1,0 +1,366 @@
+// SM+RSI v15 Portfolio MNQ -- Two-Leg Exit Strategy
+// Enters with two contract groups on the same signal:
+//   Leg A ("SM"): exits on SM flip (standard v11 exit)
+//   Leg B ("TR"): exits on trailing stop (locks profits in chop)
+//
+// Both legs share: same entries, same max loss stop, same EOD close.
+// Each can be sized independently (set qty to 0 to disable a leg).
+//
+// Based on v11 MNQ (validated). SM computed natively from AlgoAlpha's
+// open-source algorithm (Mozilla Public License 2.0).
+//
+// SETUP:
+//   1. Open MNQ on a 1-MINUTE chart
+//   2. Add this strategy
+//   3. Scroll chart left to load 500+ bars of history
+//   4. Check Properties tab after loading
+//
+//@version=6
+strategy("SM+RSI v15 Portfolio MNQ", overlay=true,
+     initial_capital=1000,
+     default_qty_type=strategy.fixed,
+     default_qty_value=1,
+     pyramiding=2,
+     close_entries_rule="ANY",
+     commission_type=strategy.commission.cash_per_contract,
+     commission_value=0.52,
+     slippage=0,
+     margin_long=0,
+     margin_short=0,
+     process_orders_on_close=false,
+     calc_on_every_tick=false,
+     fill_orders_on_standard_ohlc=true,
+     max_bars_back=5000)
+
+// --- Input Groups ---
+grp_sm    = "SMART MONEY (built-in, AlgoAlpha algorithm)"
+grp_rsi   = "RSI SETTINGS (5-min)"
+grp_port  = "PORTFOLIO (contract sizing per leg)"
+grp_trail = "TRAILING STOP (Trail leg only)"
+grp_exit  = "EXIT SETTINGS (shared)"
+grp_sess  = "SESSION FILTER"
+grp_disp  = "DISPLAY"
+
+// --- SM Inputs ---
+sm_index   = input.int(10,  "SM Index Period",   minval=1, maxval=50,  group=grp_sm)
+sm_flow    = input.int(12,  "SM Flow Period",    minval=1, maxval=50,  group=grp_sm)
+sm_norm    = input.int(200, "SM Norm Period",    minval=50, maxval=1000, group=grp_sm)
+sm_ema_len = input.int(100, "SM EMA Length",     minval=10, maxval=500, group=grp_sm)
+sm_threshold = input.float(0.00, "SM Threshold", minval=0, step=0.05, group=grp_sm)
+
+// --- RSI Inputs ---
+rsi_len     = input.int(8,   "RSI Length",     minval=2,  maxval=50, group=grp_rsi)
+rsi_buy     = input.int(60,  "RSI Buy Level",  minval=50, maxval=90, group=grp_rsi)
+rsi_sell    = input.int(40,  "RSI Sell Level",  minval=10, maxval=50, group=grp_rsi)
+
+// --- Portfolio Inputs ---
+sm_qty    = input.int(1, "SM Leg Contracts",    minval=0, maxval=10, group=grp_port,
+     tooltip="Contracts managed by SM flip exit. Set 0 to disable SM leg.")
+trail_qty = input.int(1, "Trail Leg Contracts", minval=0, maxval=10, group=grp_port,
+     tooltip="Contracts managed by trailing stop. Set 0 to disable trail leg.")
+
+// --- Trail Inputs ---
+trail_act_pts  = input.int(5,  "Trail Activate (pts)", minval=1, maxval=50, group=grp_trail,
+     tooltip="Start trailing after position is up this many points.")
+trail_dist_pts = input.int(8,  "Trail Distance (pts)", minval=1, maxval=50, group=grp_trail,
+     tooltip="Trail stop distance from max favorable price.")
+
+// --- Exit Inputs ---
+max_loss_pts = input.int(50, "Max Loss Stop (pts, 0=disabled)", minval=0, step=5, group=grp_exit)
+cooldown     = input.int(20, "Cooldown Bars", minval=0, maxval=150, group=grp_exit)
+
+// --- Session Inputs ---
+use_session = input.bool(true, "NY Session Only", group=grp_sess)
+sess_start  = input.session("1000-1545", "Entry Window (ET)",     group=grp_sess)
+sess_close  = input.session("0930-1600", "Session Close Window (ET)", group=grp_sess)
+
+// --- Display Inputs ---
+show_signals = input.bool(true, "Show Entry Signals",  group=grp_disp)
+show_sm_bg   = input.bool(true, "Show SM Background",  group=grp_disp)
+show_sm_net  = input.bool(true, "Show SM Net Index",   group=grp_disp)
+show_trail   = input.bool(true, "Show Trail Status",   group=grp_disp)
+
+// ============================================================================
+// SMART MONEY -- computed natively (AlgoAlpha algorithm, MPL 2.0)
+// ============================================================================
+dumb  = ta.pvi - ta.ema(ta.pvi, sm_ema_len)
+smart = ta.nvi - ta.ema(ta.nvi, sm_ema_len)
+
+drsi = ta.rsi(dumb, sm_flow)
+srsi = ta.rsi(smart, sm_flow)
+
+r_buy  = srsi / drsi
+r_sell = (100 - srsi) / (100 - drsi)
+
+sums_buy  = math.sum(r_buy, sm_index)
+sums_sell = math.sum(r_sell, sm_index)
+peak      = ta.highest(math.max(sums_buy, sums_sell), sm_norm)
+
+index_buy  = peak != 0 ? sums_buy / peak : 0.0
+index_sell = peak != 0 ? sums_sell / peak : 0.0
+sm_net_index = index_buy - index_sell
+
+sm_bull = sm_net_index > sm_threshold
+sm_bear = sm_net_index < -sm_threshold
+sm_flipped_bull = sm_net_index > 0 and sm_net_index[1] <= 0
+sm_flipped_bear = sm_net_index < 0 and sm_net_index[1] >= 0
+
+// ============================================================================
+// RSI -- computed on 5-min via request.security()
+// ============================================================================
+rsi_5m = request.security(syminfo.tickerid, "5", ta.rsi(close, rsi_len), lookahead=barmerge.lookahead_off)
+rsi_5m_prev = request.security(syminfo.tickerid, "5", ta.rsi(close, rsi_len)[1], lookahead=barmerge.lookahead_off)
+
+rsi_cross_up   = rsi_5m > rsi_buy and rsi_5m_prev <= rsi_buy
+rsi_cross_down = rsi_5m < rsi_sell and rsi_5m_prev >= rsi_sell
+
+// ============================================================================
+// STATE TRACKING
+// ============================================================================
+
+// Episode logic -- one entry per SM episode per direction
+var bool long_used  = false
+var bool short_used = false
+
+if not sm_bull or sm_flipped_bear
+    long_used := false
+if not sm_bear or sm_flipped_bull
+    short_used := false
+
+// Leg tracking
+var bool sm_leg_open    = false
+var bool trail_leg_open = false
+var int  trade_dir      = 0      // 1=long, -1=short, 0=flat
+
+// Trail state
+var float max_fav         = 0.0
+var bool  trail_activated = false
+
+// Cooldown
+var int bars_since_exit = 9999
+bars_since_exit += 1
+cooldown_ok = bars_since_exit >= cooldown
+
+// Session filter
+in_entry_window = not use_session or not na(time(timeframe.period, sess_start, "America/New_York"))
+in_session      = not use_session or not na(time(timeframe.period, sess_close, "America/New_York"))
+
+// Fully flat check
+is_flat = not sm_leg_open and not trail_leg_open
+
+// ============================================================================
+// EXIT LOGIC (processed before entries, priority: EOD > SL > Trail > SM Flip all)
+// ============================================================================
+
+// Track max favorable excursion every bar while in a position
+if trade_dir != 0
+    if strategy.position_size != 0
+        entry_p = strategy.position_avg_price
+        cur_fav = trade_dir == 1 ? close - entry_p : entry_p - close
+        if cur_fav > max_fav
+            max_fav := cur_fav
+
+// Flag to prevent double-processing exits on the same bar
+did_close_all = false
+
+// ---- 1. EOD CLOSE (all legs) ----
+if trade_dir != 0 and not in_session
+    strategy.close_all(comment="EOD")
+    trade_dir       := 0
+    sm_leg_open     := false
+    trail_leg_open  := false
+    max_fav         := 0.0
+    trail_activated := false
+    bars_since_exit := 0
+    did_close_all   := true
+
+// ---- 2. MAX LOSS STOP (all legs) ----
+if trade_dir != 0 and not did_close_all
+    if max_loss_pts > 0 and strategy.position_size != 0
+        entry_p_sl = strategy.position_avg_price
+        unrealized_sl = trade_dir == 1 ? close - entry_p_sl : entry_p_sl - close
+        if unrealized_sl <= -max_loss_pts
+            strategy.close_all(comment="Max Loss")
+            trade_dir       := 0
+            sm_leg_open     := false
+            trail_leg_open  := false
+            max_fav         := 0.0
+            trail_activated := false
+            bars_since_exit := 0
+            did_close_all   := true
+
+// ---- 3. TRAILING STOP EXIT (trail leg only) ----
+if trail_leg_open and trade_dir != 0 and not did_close_all
+    // Activate trail once max_fav reaches threshold
+    if max_fav >= trail_act_pts
+        trail_activated := true
+
+    // Check trail stop
+    if trail_activated and strategy.position_size != 0
+        entry_p_tr = strategy.position_avg_price
+        unrealized_tr = trade_dir == 1 ? close - entry_p_tr : entry_p_tr - close
+        trail_level = max_fav - trail_dist_pts
+        if unrealized_tr <= trail_level
+            if trade_dir == 1
+                strategy.close("Long_TR", comment="Trail")
+            if trade_dir == -1
+                strategy.close("Short_TR", comment="Trail")
+            trail_leg_open  := false
+            trail_activated := false
+            // Reset cooldown only if both legs now closed
+            if not sm_leg_open
+                bars_since_exit := 0
+                trade_dir       := 0
+                max_fav         := 0.0
+
+// ---- 4. SM FLIP EXIT (all legs -- trade thesis is over) ----
+if sm_leg_open and trade_dir == 1 and not did_close_all
+    if sm_flipped_bear
+        strategy.close("Long_SM", comment="SM Flip")
+        sm_leg_open := false
+        if trail_leg_open
+            strategy.close("Long_TR", comment="SM Flip")
+            trail_leg_open := false
+        bars_since_exit := 0
+        trade_dir       := 0
+        max_fav         := 0.0
+        trail_activated := false
+
+if sm_leg_open and trade_dir == -1 and not did_close_all
+    if sm_flipped_bull
+        strategy.close("Short_SM", comment="SM Flip")
+        sm_leg_open := false
+        if trail_leg_open
+            strategy.close("Short_TR", comment="SM Flip")
+            trail_leg_open := false
+        bars_since_exit := 0
+        trade_dir       := 0
+        max_fav         := 0.0
+        trail_activated := false
+
+// ============================================================================
+// ENTRY LOGIC
+// ============================================================================
+
+total_qty = sm_qty + trail_qty
+
+// Recalculate is_flat after exits (flags may have changed above)
+is_flat_now = not sm_leg_open and not trail_leg_open
+
+long_entry  = sm_bull and rsi_cross_up   and not long_used  and in_entry_window and cooldown_ok and total_qty > 0
+short_entry = sm_bear and rsi_cross_down and not short_used and in_entry_window and cooldown_ok and total_qty > 0
+
+if long_entry and is_flat_now
+    if sm_qty > 0
+        strategy.entry("Long_SM", strategy.long, qty=sm_qty)
+        sm_leg_open := true
+    if trail_qty > 0
+        strategy.entry("Long_TR", strategy.long, qty=trail_qty)
+        trail_leg_open := true
+    trade_dir       := 1
+    long_used       := true
+    max_fav         := 0.0
+    trail_activated := false
+    bars_since_exit := 9999
+
+if short_entry and is_flat_now
+    if sm_qty > 0
+        strategy.entry("Short_SM", strategy.short, qty=sm_qty)
+        sm_leg_open := true
+    if trail_qty > 0
+        strategy.entry("Short_TR", strategy.short, qty=trail_qty)
+        trail_leg_open := true
+    trade_dir       := -1
+    short_used      := true
+    max_fav         := 0.0
+    trail_activated := false
+    bars_since_exit := 9999
+
+// ============================================================================
+// PLOTS
+// ============================================================================
+
+// SM background
+var color sm_bg_col = na
+if sm_net_index > sm_threshold
+    sm_bg_col := color.new(color.green, 85)
+else if sm_net_index < -sm_threshold
+    sm_bg_col := color.new(color.red, 85)
+else
+    sm_bg_col := color.new(color.gray, 95)
+bgcolor(show_sm_bg ? sm_bg_col : na)
+
+// Entry signals
+plotshape(show_signals and long_entry and is_flat_now, title="Long", style=shape.triangleup, location=location.belowbar, color=color.green, size=size.small, text="L")
+plotshape(show_signals and short_entry and is_flat_now, title="Short", style=shape.triangledown, location=location.abovebar, color=color.red, size=size.small, text="S")
+
+// Trail active indicator (subtle blue tint)
+trail_bg = show_trail and trail_activated and trail_leg_open ? color.new(color.blue, 90) : na
+bgcolor(trail_bg)
+
+// SM Net Index plot (lower pane)
+sm_plot_col = sm_net_index > 0 ? color.green : color.red
+plot(show_sm_net ? sm_net_index : na, "SM Net Index", color=sm_plot_col, linewidth=2, display=display.pane)
+hline(0, "Zero", color=color.gray, linestyle=hline.style_dotted)
+
+// ============================================================================
+// INFO TABLE
+// ============================================================================
+var table info = table.new(position.top_right, 2, 12, bgcolor=color.new(color.black, 80))
+if barstate.islastconfirmedhistory
+    table.cell(info, 0, 0, "v15 Portfolio", text_color=color.white, text_size=size.small)
+    table.cell(info, 1, 0, "SM + Trail", text_color=color.aqua, text_size=size.small)
+
+    table.cell(info, 0, 1, "SM Idx/Flw", text_color=color.gray, text_size=size.small)
+    table.cell(info, 1, 1, str.tostring(sm_index) + "/" + str.tostring(sm_flow), text_color=color.white, text_size=size.small)
+    table.cell(info, 0, 2, "SM Nrm/EMA", text_color=color.gray, text_size=size.small)
+    table.cell(info, 1, 2, str.tostring(sm_norm) + "/" + str.tostring(sm_ema_len), text_color=color.white, text_size=size.small)
+
+    table.cell(info, 0, 3, "SM Leg", text_color=color.gray, text_size=size.small)
+    sm_leg_text = str.tostring(sm_qty) + " ct"
+    sm_leg_col = sm_qty > 0 ? color.green : color.gray
+    table.cell(info, 1, 3, sm_leg_text, text_color=sm_leg_col, text_size=size.small)
+
+    table.cell(info, 0, 4, "Trail Leg", text_color=color.gray, text_size=size.small)
+    trail_leg_text = str.tostring(trail_qty) + " ct"
+    trail_leg_col = trail_qty > 0 ? color.aqua : color.gray
+    table.cell(info, 1, 4, trail_leg_text, text_color=trail_leg_col, text_size=size.small)
+
+    table.cell(info, 0, 5, "Trail Cfg", text_color=color.gray, text_size=size.small)
+    trail_cfg_text = str.tostring(trail_act_pts) + "/" + str.tostring(trail_dist_pts) + " pts"
+    table.cell(info, 1, 5, trail_cfg_text, text_color=color.aqua, text_size=size.small)
+
+    table.cell(info, 0, 6, "Max Loss", text_color=color.gray, text_size=size.small)
+    ml_text = max_loss_pts > 0 ? str.tostring(max_loss_pts) + " pts" : "OFF"
+    ml_col = max_loss_pts > 0 ? color.yellow : color.gray
+    table.cell(info, 1, 6, ml_text, text_color=ml_col, text_size=size.small)
+
+    table.cell(info, 0, 7, "Cooldown", text_color=color.gray, text_size=size.small)
+    table.cell(info, 1, 7, str.tostring(cooldown) + " bars", text_color=color.white, text_size=size.small)
+
+    table.cell(info, 0, 8, "SM Now", text_color=color.gray, text_size=size.small)
+    sm_col = sm_net_index > 0 ? color.green : color.red
+    table.cell(info, 1, 8, str.tostring(sm_net_index, "#.###"), text_color=sm_col, text_size=size.small)
+
+    table.cell(info, 0, 9, "5m RSI", text_color=color.gray, text_size=size.small)
+    rsi_col = color.white
+    if rsi_5m > rsi_buy
+        rsi_col := color.green
+    else if rsi_5m < rsi_sell
+        rsi_col := color.red
+    table.cell(info, 1, 9, str.tostring(rsi_5m, "#.#"), text_color=rsi_col, text_size=size.small)
+
+    rsi_label = "RSI" + str.tostring(rsi_len) + " " + str.tostring(rsi_buy) + "/" + str.tostring(rsi_sell)
+    table.cell(info, 0, 10, "RSI Cfg", text_color=color.gray, text_size=size.small)
+    table.cell(info, 1, 10, rsi_label, text_color=color.yellow, text_size=size.small)
+
+    table.cell(info, 0, 11, "Trail", text_color=color.gray, text_size=size.small)
+    trail_status = "Idle"
+    trail_status_col = color.gray
+    if trail_leg_open and trail_activated
+        trail_status := "Active"
+        trail_status_col := color.aqua
+    else if trail_leg_open
+        trail_status := "Watching"
+        trail_status_col := color.yellow
+    table.cell(info, 1, 11, trail_status, text_color=trail_status_col, text_size=size.small)

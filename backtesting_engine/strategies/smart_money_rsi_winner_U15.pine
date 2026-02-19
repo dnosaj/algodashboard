@@ -1,0 +1,113 @@
+// Smart Money + RSI (Chop & Explode) Strategy — Best Version
+// 5-min MNQ | User's SM params (10,8,150,255) | RSI 11 at 65/35 | SM Flip Exit
+//
+// ══════════════════════════════════════════════════════════════
+// TOP 5 from Round 4 (user's real indicator settings):
+//
+// #1 U15: User SM(10,8,150,255), RSI 11, 65/35, 5m, SM flip
+//    PF: 4.605 | Win: 58.3% | Sharpe: 1.027 | MaxDD: -0.92% | Net: +3.21% | 24 trades
+//
+// #2 U25: Hybrid SM(15,10,300,150), RSI 11, 5m, SM flip
+//    PF: 4.120 | Win: 58.8% | Sharpe: 1.016 | MaxDD: -1.06% | Net: +5.18% | 34 trades
+//
+// #3 U24: User SM + RSI 65/35 + SM thr 0.05, 5m, SM flip
+//    PF: 4.056 | Win: 53.3% | Sharpe: 0.831 | MaxDD: -0.87% | Net: +1.99% | 15 trades
+//
+// #4 U8:  User SM(10,8,150,255), RSI 11, 60/40, 5m, SM flip
+//    PF: 2.880 | Win: 56.4% | Sharpe: 1.051 | MaxDD: -0.88% | Net: +4.33% | 39 trades
+//
+// #5 U18: User SM + EMA 20 trend, 5m, SM flip
+//    PF: 2.880 | Win: 56.4% | Sharpe: 1.051 | MaxDD: -0.88% | Net: +4.33% | 39 trades
+// ══════════════════════════════════════════════════════════════
+//
+// This script defaults to #1 (U15). Toggle inputs to test others.
+//
+// Entry:
+//   LONG  — SM net_index > 0 (green) AND RSI crosses above 65 (flips blue)
+//   SHORT — SM net_index < 0 (red)   AND RSI crosses below 35 (flips purple)
+// Exit:
+//   LONG  — SM flips from green to red (net_index crosses below 0)
+//   SHORT — SM flips from red to green (net_index crosses above 0)
+//
+// Apply to 5-minute MNQ chart.
+
+//@version=6
+strategy("SM + RSI Winner", overlay=true, initial_capital=1000,
+     default_qty_type=strategy.percent_of_equity, default_qty_value=100,
+     commission_type=strategy.commission.percent, commission_value=0.005,
+     slippage=0, margin_long=0, margin_short=0,
+     calc_on_every_tick=false, fill_orders_on_standard_ohlc=true)
+
+// ─── Inputs ──────────────────────────────────────────────────────────────────
+// Smart Money parameters (user's settings from 1-min chart)
+sm_index_period  = input.int(10,  "SM Index Period",        minval=1)
+sm_flow_period   = input.int(8,   "SM Volume Flow Period",  minval=1)
+sm_norm_period   = input.int(150, "SM Normalization Period", minval=1)
+sm_ema_len       = input.int(255, "SM EMA Length",           minval=1)
+
+// RSI parameters (user's RSI length = 11, tighter levels = 65/35)
+rsi_len    = input.int(11, "RSI Length",     minval=1)
+rsi_buy    = input.float(65, "RSI Buy Level (blue flip)")
+rsi_sell   = input.float(35, "RSI Sell Level (purple flip)")
+
+// ─── Smart Money Volume Index ────────────────────────────────────────────────
+dumb  = ta.pvi - ta.ema(ta.pvi, sm_ema_len)
+smart = ta.nvi - ta.ema(ta.nvi, sm_ema_len)
+
+drsi = ta.rsi(dumb, sm_flow_period)
+srsi = ta.rsi(smart, sm_flow_period)
+
+r_buy  = srsi / drsi
+r_sell = (100 - srsi) / (100 - drsi)
+
+sums_buy  = math.sum(r_buy, sm_index_period)
+sums_sell = math.sum(r_sell, sm_index_period)
+peak      = ta.highest(math.max(sums_buy, sums_sell), sm_norm_period)
+
+index_buy  = sums_buy / peak
+index_sell = sums_sell / peak
+net_index  = index_buy - index_sell
+
+// ─── RSI (Chop & Explode) ───────────────────────────────────────────────────
+rsi = ta.rsi(close, rsi_len)
+
+rsi_flips_blue   = ta.crossover(rsi, rsi_buy)
+rsi_flips_purple = ta.crossunder(rsi, rsi_sell)
+
+// ─── Conditions ─────────────────────────────────────────────────────────────
+sm_green = net_index > 0
+sm_red   = net_index < 0
+
+sm_flips_red   = ta.crossunder(net_index, 0)
+sm_flips_green = ta.crossover(net_index, 0)
+
+long_entry  = sm_green and rsi_flips_blue
+short_entry = sm_red   and rsi_flips_purple
+
+long_exit  = sm_flips_red   or short_entry
+short_exit = sm_flips_green or long_entry
+
+// ─── Strategy Execution ─────────────────────────────────────────────────────
+if long_entry
+    strategy.entry("Long", strategy.long)
+
+if short_entry
+    strategy.entry("Short", strategy.short)
+
+if long_exit and strategy.position_size > 0
+    strategy.close("Long")
+
+if short_exit and strategy.position_size < 0
+    strategy.close("Short")
+
+// ─── Plots ──────────────────────────────────────────────────────────────────
+plotshape(long_entry,  title="Buy",  style=shape.triangleup,   location=location.belowbar, color=color.new(#00ffbb, 0), size=size.small)
+plotshape(short_entry, title="Sell", style=shape.triangledown, location=location.abovebar, color=color.new(#ff1100, 0), size=size.small)
+
+plotshape(long_exit  and strategy.position_size > 0, title="Close Long",  style=shape.xcross, location=location.abovebar, color=color.new(#ff1100, 30), size=size.tiny)
+plotshape(short_exit and strategy.position_size < 0, title="Close Short", style=shape.xcross, location=location.belowbar, color=color.new(#00ffbb, 30), size=size.tiny)
+
+bgcolor(sm_green ? color.new(#00ffbb, 95) : sm_red ? color.new(#ff1100, 95) : na)
+
+rsi_color = rsi > rsi_buy ? color.new(color.blue, 70) : rsi < rsi_sell ? color.new(color.purple, 70) : na
+barcolor(rsi_color)

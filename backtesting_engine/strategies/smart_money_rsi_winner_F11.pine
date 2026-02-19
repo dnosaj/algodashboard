@@ -1,0 +1,112 @@
+// Smart Money + RSI (Chop & Explode) Strategy — F11 Winner
+// 5-min MNQ | Fast SM params (15,10,300,150) | SM Flip Exit
+//
+// Backtest results (7 days MNQ, $1000, 0.005% commission):
+//   PF: 5.852 | Win Rate: 69.23% | Sharpe: 0.999
+//   MaxDD: -0.80% | Net: +$47.08 (4.71%) | 26 trades
+//
+// Entry:
+//   LONG  — Smart Money net_index > 0 (green) AND RSI crosses above 60 (flips blue)
+//   SHORT — Smart Money net_index < 0 (red)   AND RSI crosses below 40 (flips purple)
+// Exit:
+//   LONG  — Smart Money flips from green to red (net_index crosses below 0)
+//   SHORT — Smart Money flips from red to green (net_index crosses above 0)
+//
+// Apply to 5-minute MNQ chart.
+
+//@version=6
+strategy("SM + RSI F11", overlay=true, initial_capital=1000,
+     default_qty_type=strategy.percent_of_equity, default_qty_value=100,
+     commission_type=strategy.commission.percent, commission_value=0.005,
+     slippage=0, margin_long=0, margin_short=0,
+     calc_on_every_tick=false, fill_orders_on_standard_ohlc=true)
+
+// ─── Inputs ──────────────────────────────────────────────────────────────────
+sm_index_period  = input.int(15,  "SM Index Period",        minval=1)
+sm_flow_period   = input.int(10,  "SM Volume Flow Period",  minval=1)
+sm_norm_period   = input.int(300, "SM Normalization Period", minval=1)
+sm_ema_len       = input.int(150, "SM EMA Length",           minval=1)
+
+rsi_len    = input.int(14, "RSI Length",     minval=1)
+rsi_buy    = input.float(60, "RSI Buy Level (blue flip)")
+rsi_sell   = input.float(40, "RSI Sell Level (purple flip)")
+
+show_debug = input.bool(true, "Show Debug Plots")
+
+// ─── Smart Money Volume Index ────────────────────────────────────────────────
+// Use nz() to handle NaN values from PVI/NVI on futures data
+raw_pvi = ta.pvi
+raw_nvi = ta.nvi
+
+dumb  = nz(raw_pvi) - ta.ema(nz(raw_pvi), sm_ema_len)
+smart = nz(raw_nvi) - ta.ema(nz(raw_nvi), sm_ema_len)
+
+drsi = ta.rsi(dumb, sm_flow_period)
+srsi = ta.rsi(smart, sm_flow_period)
+
+// Protect against division by zero
+r_buy  = nz(drsi) != 0 ? nz(srsi) / nz(drsi) : 0.0
+r_sell = (100 - nz(drsi)) != 0 ? (100 - nz(srsi)) / (100 - nz(drsi)) : 0.0
+
+sums_buy  = math.sum(r_buy, sm_index_period)
+sums_sell = math.sum(r_sell, sm_index_period)
+peak      = ta.highest(math.max(sums_buy, sums_sell), sm_norm_period)
+
+index_buy  = peak != 0 ? sums_buy / peak : 0.0
+index_sell = peak != 0 ? sums_sell / peak : 0.0
+net_index  = index_buy - index_sell
+
+// ─── RSI (Chop & Explode) ───────────────────────────────────────────────────
+rsi = ta.rsi(close, rsi_len)
+
+rsi_flips_blue   = ta.crossover(rsi, rsi_buy)
+rsi_flips_purple = ta.crossunder(rsi, rsi_sell)
+
+// ─── Conditions ─────────────────────────────────────────────────────────────
+sm_green = net_index > 0
+sm_red   = net_index < 0
+
+sm_flips_red   = ta.crossunder(net_index, 0)
+sm_flips_green = ta.crossover(net_index, 0)
+
+long_entry  = sm_green and rsi_flips_blue
+short_entry = sm_red   and rsi_flips_purple
+
+long_exit  = sm_flips_red   or short_entry
+short_exit = sm_flips_green or long_entry
+
+// ─── Strategy Execution ─────────────────────────────────────────────────────
+if long_entry
+    strategy.entry("Long", strategy.long)
+
+if short_entry
+    strategy.entry("Short", strategy.short)
+
+if long_exit and strategy.position_size > 0
+    strategy.close("Long")
+
+if short_exit and strategy.position_size < 0
+    strategy.close("Short")
+
+// ─── Plots ──────────────────────────────────────────────────────────────────
+plotshape(long_entry,  title="Buy",  style=shape.triangleup,   location=location.belowbar, color=color.new(#00ffbb, 0), size=size.small)
+plotshape(short_entry, title="Sell", style=shape.triangledown, location=location.abovebar, color=color.new(#ff1100, 0), size=size.small)
+
+plotshape(long_exit  and strategy.position_size > 0, title="Close Long",  style=shape.xcross, location=location.abovebar, color=color.new(#ff1100, 30), size=size.tiny)
+plotshape(short_exit and strategy.position_size < 0, title="Close Short", style=shape.xcross, location=location.belowbar, color=color.new(#00ffbb, 30), size=size.tiny)
+
+bgcolor(sm_green ? color.new(#00ffbb, 95) : sm_red ? color.new(#ff1100, 95) : na)
+
+rsi_color = rsi > rsi_buy ? color.new(color.blue, 70) : rsi < rsi_sell ? color.new(color.purple, 70) : na
+barcolor(rsi_color)
+
+// ─── Debug: plot net_index and RSI in separate pane ─────────────────────────
+// This helps verify the SM indicator is computing correctly
+plot(show_debug ? net_index : na, "SM Net Index", color=net_index > 0 ? color.green : color.red, linewidth=2)
+hline(0, "Zero", color=color.gray, linestyle=hline.style_dotted)
+plot(show_debug ? rsi / 100 - 0.5 : na, "RSI (scaled)", color=color.blue, linewidth=1)
+
+// Debug: show raw PVI/NVI values in data window
+plot(show_debug ? raw_pvi : na, "Raw PVI", display=display.data_window)
+plot(show_debug ? raw_nvi : na, "Raw NVI", display=display.data_window)
+plot(show_debug ? volume : na, "Volume", display=display.data_window)

@@ -1,0 +1,120 @@
+// Smart Money + RSI Scalper — TradingView Backtester Version
+// 1-min MNQ | User settings: RSI 11, SM (10,8,150,255)
+// Entry: SM green + RSI flips blue = LONG, SM red + RSI flips purple = SHORT
+// Exit: TP 15pts / SL 7pts
+//
+// PVI/NVI computed manually from volume to avoid ta.pvi/ta.nvi issues on futures.
+//
+// Apply to 1-minute MNQ chart.
+
+//@version=6
+strategy("SM + RSI Scalper", overlay=true, initial_capital=1000,
+     default_qty_type=strategy.percent_of_equity, default_qty_value=100,
+     commission_type=strategy.commission.percent, commission_value=0.005,
+     slippage=0, margin_long=0, margin_short=0,
+     calc_on_every_tick=false, fill_orders_on_standard_ohlc=true)
+
+// ─── Inputs ──────────────────────────────────────────────────────────────────
+sm_index_period  = input.int(10,  "SM Index Period",        minval=1)
+sm_flow_period   = input.int(8,   "SM Volume Flow Period",  minval=1)
+sm_norm_period   = input.int(150, "SM Normalization Period", minval=1)
+sm_ema_len       = input.int(255, "SM EMA Length",           minval=1)
+
+rsi_len    = input.int(11,   "RSI Length",     minval=1)
+rsi_buy    = input.float(60, "RSI Buy Level (blue flip)")
+rsi_sell   = input.float(40, "RSI Sell Level (purple flip)")
+
+tp_pts = input.float(15, "Take Profit (points)")
+sl_pts = input.float(7,  "Stop Loss (points)")
+
+show_debug = input.bool(true, "Show Debug Plots")
+
+// ─── Manual PVI / NVI Calculation ──────────────────────────────────────────
+// PVI (Positive Volume Index): updates when volume increases
+// NVI (Negative Volume Index): updates when volume decreases
+// This avoids relying on ta.pvi/ta.nvi which may not work on all futures
+
+var float pvi = 1.0
+var float nvi = 1.0
+
+float pct_change = close[1] != 0 ? (close - close[1]) / close[1] : 0.0
+
+if bar_index > 0
+    if volume > volume[1]
+        pvi := pvi[1] + pct_change * pvi[1]
+        nvi := nvi[1]
+    else if volume < volume[1]
+        nvi := nvi[1] + pct_change * nvi[1]
+        pvi := pvi[1]
+    else
+        pvi := pvi[1]
+        nvi := nvi[1]
+
+// ─── Smart Money Volume Index ──────────────────────────────────────────────
+dumb  = pvi - ta.ema(pvi, sm_ema_len)
+smart = nvi - ta.ema(nvi, sm_ema_len)
+
+drsi = ta.rsi(dumb, sm_flow_period)
+srsi = ta.rsi(smart, sm_flow_period)
+
+// Protect against division by zero
+r_buy  = nz(drsi) != 0 ? nz(srsi) / nz(drsi) : 0.0
+r_sell = (100 - nz(drsi)) != 0 ? (100 - nz(srsi)) / (100 - nz(drsi)) : 0.0
+
+sums_buy  = math.sum(r_buy, sm_index_period)
+sums_sell = math.sum(r_sell, sm_index_period)
+peak      = ta.highest(math.max(sums_buy, sums_sell), sm_norm_period)
+
+index_buy  = peak != 0 ? sums_buy / peak : 0.0
+index_sell = peak != 0 ? sums_sell / peak : 0.0
+net_index  = index_buy - index_sell
+
+// ─── RSI ───────────────────────────────────────────────────────────────────
+rsi = ta.rsi(close, rsi_len)
+
+rsi_flips_blue   = ta.crossover(rsi, rsi_buy)
+rsi_flips_purple = ta.crossunder(rsi, rsi_sell)
+
+// ─── Conditions ────────────────────────────────────────────────────────────
+sm_green = net_index > 0
+sm_red   = net_index < 0
+
+long_entry  = sm_green and rsi_flips_blue
+short_entry = sm_red   and rsi_flips_purple
+
+// ─── Strategy Execution ────────────────────────────────────────────────────
+if long_entry
+    strategy.entry("Long", strategy.long)
+
+if short_entry
+    strategy.entry("Short", strategy.short)
+
+// TP/SL exits
+if strategy.position_size > 0
+    strategy.exit("Long Exit", "Long", profit=tp_pts / syminfo.mintick,
+         loss=sl_pts / syminfo.mintick)
+
+if strategy.position_size < 0
+    strategy.exit("Short Exit", "Short", profit=tp_pts / syminfo.mintick,
+         loss=sl_pts / syminfo.mintick)
+
+// ─── Plots ─────────────────────────────────────────────────────────────────
+plotshape(long_entry,  title="Buy",  style=shape.triangleup,
+     location=location.belowbar, color=color.new(#00ffbb, 0), size=size.small)
+plotshape(short_entry, title="Sell", style=shape.triangledown,
+     location=location.abovebar, color=color.new(#ff1100, 0), size=size.small)
+
+bgcolor(sm_green ? color.new(#00ffbb, 95) : sm_red ? color.new(#ff1100, 95) : na)
+
+rsi_color = rsi > rsi_buy ? color.new(color.blue, 70) : rsi < rsi_sell ? color.new(color.purple, 70) : na
+barcolor(rsi_color)
+
+// ─── Debug Plots ───────────────────────────────────────────────────────────
+plot(show_debug ? net_index : na, "SM Net Index",
+     color=net_index > 0 ? color.green : color.red, linewidth=2)
+hline(0, "Zero", color=color.gray, linestyle=hline.style_dotted)
+plot(show_debug ? rsi / 100 - 0.5 : na, "RSI (scaled)",
+     color=color.blue, linewidth=1)
+plot(show_debug ? volume : na, "Volume", display=display.data_window)
+plot(show_debug ? pvi : na, "PVI (manual)", display=display.data_window)
+plot(show_debug ? nvi : na, "NVI (manual)", display=display.data_window)

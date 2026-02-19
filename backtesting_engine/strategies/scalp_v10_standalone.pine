@@ -1,0 +1,581 @@
+// This Pine Script(TM) is subject to the Terms of Use at https://www.tradingview.com/pine-script-docs/
+// @description SM+RSI v10 Standalone - SM-Flip Strategy with Embedded Smart Money
+// Runs on 1-MIN MNQ chart. SM computed internally (no external indicator needed).
+// Uses 5-min RSI via request.security() for entry confirmation.
+// Exit: SM flips sign (crosses zero) - lets winners run.
+//
+// v10 adds: ATR hard stop, trailing stop, breakeven stop, daily risk limits,
+//           alerts, live dashboard, stop level lines.
+//           ALL safety features can be toggled OFF for exact v9 regression.
+//
+// STANDALONE: Smart Money logic from AlgoAlpha "Smart Money Volume Index"
+//   (MPL 2.0, (c) AlgoAlpha) is embedded directly. No external indicator needed.
+//   Just add this strategy to a 1-min chart and it works immediately.
+//
+// SETUP:
+//   1. Open MNQ on a 1-MINUTE chart
+//   2. Add this strategy — that's it
+//
+// EXIT PRIORITY (highest first):
+//   1. EOD Close — 16:00 ET (non-negotiable)
+//   2. Hard Stop Loss — strategy.exit() with loss= ticks (fires intrabar)
+//   3. Trailing Stop — strategy.exit() with trail_points/trail_offset (fires intrabar)
+//   4. Breakeven Stop — strategy.exit() with stop= price (fires intrabar)
+//   5. SM Flip Exit — strategy.close() (fires at bar close)
+
+//@version=6
+strategy("SM+RSI v10 Standalone", overlay=true,
+     initial_capital=1000,
+     default_qty_type=strategy.fixed,
+     default_qty_value=1,
+     commission_type=strategy.commission.cash_per_contract,
+     commission_value=0.52,
+     slippage=1,
+     margin_long=0,
+     margin_short=0,
+     process_orders_on_close=false,
+     calc_on_every_tick=false,
+     fill_orders_on_standard_ohlc=true,
+     max_bars_back=5000)
+
+// ============================================================================
+// INPUT GROUPS
+// ============================================================================
+grp_sm    = "1. SMART MONEY (embedded computation)"
+grp_rsi   = "2. RSI SETTINGS (5-min)"
+grp_sl    = "3. HARD STOP LOSS"
+grp_trail = "4. TRAILING STOP"
+grp_be    = "5. BREAKEVEN STOP"
+grp_risk  = "6. DAILY RISK MANAGEMENT"
+grp_sess  = "7. SESSION FILTER"
+grp_disp  = "8. DISPLAY & ALERTS"
+
+// --- SM Inputs (now direct parameters instead of input.source) ---
+sm_index_len  = input.int(25,  "Index Period",         minval=1,  maxval=100, group=grp_sm,
+     tooltip="Summation period for buy/sell interest ratio. AlgoAlpha default: 25. Fast intraday: 15.")
+sm_flow_len   = input.int(14,  "Volume Flow Period",   minval=1,  maxval=50,  group=grp_sm,
+     tooltip="RSI period for PVI/NVI flow. AlgoAlpha default: 14. Fast intraday: 10.")
+sm_norm_len   = input.int(500, "Normalization Period",  minval=50, maxval=2000, group=grp_sm,
+     tooltip="Lookback for peak normalization. AlgoAlpha default: 500. Fast intraday: 300.")
+sm_ema_len    = input.int(255, "PVI/NVI EMA Length",    minval=50, maxval=500,  group=grp_sm,
+     tooltip="EMA smoothing for PVI/NVI baseline. AlgoAlpha default: 255. Fast intraday: 150.")
+sm_threshold  = input.float(0.00, "SM Net Index Threshold", minval=0, step=0.05, group=grp_sm,
+     tooltip="Min |SM| to confirm direction. 0 = any non-zero SM. 0.05-0.10 = moderate filter.")
+
+// --- RSI Inputs (unchanged from v9) ---
+rsi_len     = input.int(10,  "RSI Length",     minval=2,  maxval=50, group=grp_rsi)
+rsi_buy     = input.int(55,  "RSI Buy Level",  minval=50, maxval=90, group=grp_rsi)
+rsi_sell    = input.int(45,  "RSI Sell Level", minval=10, maxval=50, group=grp_rsi)
+
+// --- Hard Stop Loss Inputs ---
+use_hard_sl    = input.bool(true,   "Enable Hard Stop Loss", group=grp_sl,
+     tooltip="Safety net stop. Wide enough that SM flip usually exits first. Catches flash crashes.")
+sl_mode        = input.string("ATR", "Stop Mode", options=["ATR", "Fixed"], group=grp_sl,
+     tooltip="ATR: adapts to volatility (recommended). Fixed: constant point distance.")
+sl_atr_len     = input.int(14,   "ATR Length",       minval=5,  maxval=50,   group=grp_sl)
+sl_atr_mult    = input.float(3.0, "ATR Multiplier",  minval=1.0, maxval=10.0, step=0.5, group=grp_sl,
+     tooltip="3x ATR on MNQ 1-min ~ 9-15 pts. Wide enough for normal SM-flip to fire first.")
+sl_fixed_pts   = input.float(15.0, "Fixed Stop (points)", minval=1.0, step=1.0, group=grp_sl,
+     tooltip="Only used when Stop Mode = Fixed. Distance in points from entry.")
+
+// --- Trailing Stop Inputs ---
+use_trail      = input.bool(false,  "Enable Trailing Stop", group=grp_trail,
+     tooltip="OFF by default. SM-flip handles most profit-taking. Enable after forward-testing.")
+trail_activate = input.float(15.0, "Activation (points in profit)", minval=1.0, step=1.0, group=grp_trail,
+     tooltip="Trail only activates after price moves this far in your favor.")
+trail_distance = input.float(8.0,  "Trail Distance (points)",       minval=1.0, step=1.0, group=grp_trail,
+     tooltip="Once activated, stop trails this far behind the best price.")
+
+// --- Breakeven Stop Inputs ---
+use_be         = input.bool(false,  "Enable Breakeven Stop", group=grp_be,
+     tooltip="OFF by default. Moves stop to entry+offset after trade moves X pts in favor.")
+be_trigger     = input.float(8.0,  "BE Trigger (points in profit)", minval=1.0, step=1.0, group=grp_be,
+     tooltip="Move stop to breakeven after this many points of profit.")
+be_offset      = input.float(0.5,  "BE Offset (points above entry)", minval=0.0, step=0.25, group=grp_be,
+     tooltip="Small positive offset covers commission. 0.5 pts = $1.00 on MNQ.")
+
+// --- Daily Risk Management Inputs ---
+use_daily_limit   = input.bool(true,  "Enable Daily Loss Limit", group=grp_risk,
+     tooltip="Stops new entries if daily equity drops below threshold. Existing positions stay open.")
+daily_loss_pct    = input.float(3.0,  "Daily Loss Limit (%)", minval=0.5, maxval=20.0, step=0.5, group=grp_risk,
+     tooltip="Max daily drawdown as % of day-start equity. 3% is conservative for MNQ.")
+max_consec_losses = input.int(0,      "Max Consecutive Losses (0=OFF)", minval=0, maxval=20, group=grp_risk,
+     tooltip="Pause entries after N losses in a row. 0 = disabled. Streak does NOT reset on new day.")
+cooldown          = input.int(15,     "Cooldown Bars After Exit (1-min bars)", minval=0, maxval=150, group=grp_risk,
+     tooltip="Bars to wait after exit. 15 bars on 1-min = 15 min = 3 bars on 5-min.")
+
+// --- Session Inputs (unchanged from v9) ---
+use_session = input.bool(true, "NY Session Only", group=grp_sess)
+sess_start  = input.session("1000-1545", "Entry Window (ET)",     group=grp_sess)
+sess_close  = input.session("0930-1600", "Session Close Window (ET)", group=grp_sess)
+
+// --- Display & Alert Inputs ---
+show_signals   = input.bool(true,  "Show Entry Signals",     group=grp_disp)
+show_sm_bg     = input.bool(true,  "Show SM Background",     group=grp_disp)
+show_sm_net    = input.bool(true,  "Show SM Net Index",      group=grp_disp)
+show_stops     = input.bool(true,  "Show Stop Level Lines",  group=grp_disp,
+     tooltip="Draw horizontal lines showing hard SL, trail, and BE levels when in a position.")
+show_dashboard = input.bool(true,  "Show Live Dashboard",    group=grp_disp,
+     tooltip="Real-time table with position, P&L, stops, daily stats, risk status.")
+
+// ============================================================================
+// SMART MONEY - embedded computation
+// Core logic from AlgoAlpha "Smart Money Volume Index" (MPL 2.0, (c) AlgoAlpha)
+// ============================================================================
+
+// PVI/NVI deviation from their EMA baseline
+sm_dumb  = ta.pvi - ta.ema(ta.pvi, sm_ema_len)
+sm_smart = ta.nvi - ta.ema(ta.nvi, sm_ema_len)
+
+// RSI of each flow
+sm_drsi = ta.rsi(sm_dumb, sm_flow_len)
+sm_srsi = ta.rsi(sm_smart, sm_flow_len)
+
+// Buy ratio: smart RSI / dumb RSI (smart buying while dumb selling)
+// Sell ratio: (100-smart RSI) / (100-dumb RSI) (smart selling while dumb buying)
+sm_r_buy  = sm_srsi / sm_drsi
+sm_r_sell = (100.0 - sm_srsi) / (100.0 - sm_drsi)
+
+// Summation over index period
+sm_sums_buy  = math.sum(sm_r_buy, sm_index_len)
+sm_sums_sell = math.sum(sm_r_sell, sm_index_len)
+
+// Normalize to [0,1] using rolling peak
+sm_peak = ta.highest(math.max(sm_sums_buy, sm_sums_sell), sm_norm_len)
+
+sm_index_buy  = sm_peak > 0 ? sm_sums_buy / sm_peak : 0.0
+sm_index_sell = sm_peak > 0 ? sm_sums_sell / sm_peak : 0.0
+
+// Net index: positive = smart money buying, negative = smart money selling
+sm_net_index = sm_index_buy - sm_index_sell
+
+// Volume availability check
+has_volume = nz(volume) > 0
+
+// SM direction
+sm_bull = sm_net_index > sm_threshold
+sm_bear = sm_net_index < -sm_threshold
+
+// SM flip (cross zero)
+sm_flipped_bull = sm_net_index > 0 and sm_net_index[1] <= 0
+sm_flipped_bear = sm_net_index < 0 and sm_net_index[1] >= 0
+
+// ============================================================================
+// RSI - computed on 5-min via request.security()
+// (PRESERVED EXACTLY FROM v9)
+// ============================================================================
+rsi_5m = request.security(syminfo.tickerid, "5", ta.rsi(close, rsi_len), lookahead=barmerge.lookahead_off)
+rsi_5m_prev = request.security(syminfo.tickerid, "5", ta.rsi(close, rsi_len)[1], lookahead=barmerge.lookahead_off)
+
+rsi_cross_up   = rsi_5m > rsi_buy and rsi_5m_prev <= rsi_buy
+rsi_cross_down = rsi_5m < rsi_sell and rsi_5m_prev >= rsi_sell
+
+// ============================================================================
+// ATR COMPUTATION (for hard stop loss)
+// ============================================================================
+atr_val = ta.atr(sl_atr_len)
+atr_safe = nz(atr_val, 10.0)
+
+// ============================================================================
+// DAILY RISK TRACKING
+// ============================================================================
+var float day_start_equity = strategy.equity
+var int   consec_losses    = 0
+var int   day_trades       = 0
+var int   day_wins         = 0
+var int   day_losses       = 0
+
+new_day = ta.change(time("D")) != 0
+if new_day
+    day_start_equity := strategy.equity
+    day_trades       := 0
+    day_wins         := 0
+    day_losses       := 0
+
+day_pnl     = strategy.equity - day_start_equity
+day_pnl_pct = day_start_equity > 0 ? (day_pnl / day_start_equity) * 100 : 0.0
+
+var int prev_closed_count = 0
+curr_closed_count = strategy.closedtrades
+if curr_closed_count > prev_closed_count
+    last_profit = strategy.closedtrades.profit(curr_closed_count - 1)
+    day_trades += 1
+    if last_profit >= 0
+        day_wins += 1
+        consec_losses := 0
+    else
+        day_losses += 1
+        consec_losses += 1
+    prev_closed_count := curr_closed_count
+
+daily_paused  = use_daily_limit and day_pnl_pct <= -daily_loss_pct
+consec_paused = max_consec_losses > 0 and consec_losses >= max_consec_losses
+risk_ok       = not daily_paused and not consec_paused
+
+// ============================================================================
+// ENTRY/EXIT LOGIC
+// ============================================================================
+
+var bool long_used  = false
+var bool short_used = false
+
+if not sm_bull or sm_flipped_bear
+    long_used := false
+if not sm_bear or sm_flipped_bull
+    short_used := false
+
+in_entry_window = not use_session or not na(time(timeframe.period, sess_start, "America/New_York"))
+in_session      = not use_session or not na(time(timeframe.period, sess_close, "America/New_York"))
+
+var int bars_since_exit = 9999
+bars_since_exit += 1
+cooldown_ok = bars_since_exit >= cooldown
+
+long_entry  = sm_bull and rsi_cross_up   and not long_used  and in_entry_window and cooldown_ok and risk_ok
+short_entry = sm_bear and rsi_cross_down and not short_used and in_entry_window and cooldown_ok and risk_ok
+
+long_exit_sm  = sm_flipped_bear
+short_exit_sm = sm_flipped_bull
+eod_close = strategy.position_size != 0 and not in_session
+
+// ============================================================================
+// STOP LOSS CALCULATIONS
+// ============================================================================
+hard_sl_pts = sl_mode == "ATR" ? atr_safe * sl_atr_mult : sl_fixed_pts
+hard_sl_ticks = math.round(hard_sl_pts / syminfo.mintick)
+
+var float entry_price = na
+var float best_price  = na
+
+if strategy.position_size != 0 and strategy.position_size[1] == 0
+    entry_price := strategy.position_avg_price
+    best_price  := strategy.position_avg_price
+
+if strategy.position_size > 0
+    best_price := math.max(nz(best_price, high), high)
+else if strategy.position_size < 0
+    best_price := math.min(nz(best_price, low), low)
+
+if strategy.position_size == 0
+    entry_price := na
+    best_price  := na
+
+var float hard_sl_price = na
+var float trail_price   = na
+var float be_price      = na
+
+if strategy.position_size > 0 and not na(entry_price)
+    hard_sl_price := use_hard_sl ? entry_price - hard_sl_pts : na
+    be_candidate = entry_price + be_offset
+    be_triggered = use_be and (high - entry_price) >= be_trigger
+    be_price := be_triggered and (na(hard_sl_price) or be_candidate > hard_sl_price) ? be_candidate : na
+    trail_candidate = nz(best_price) - trail_distance
+    trail_triggered = use_trail and (nz(best_price) - entry_price) >= trail_activate
+    trail_price := trail_triggered ? trail_candidate : na
+else if strategy.position_size < 0 and not na(entry_price)
+    hard_sl_price := use_hard_sl ? entry_price + hard_sl_pts : na
+    be_candidate = entry_price - be_offset
+    be_triggered = use_be and (entry_price - low) >= be_trigger
+    be_price := be_triggered and (na(hard_sl_price) or be_candidate < hard_sl_price) ? be_candidate : na
+    trail_candidate = nz(best_price) + trail_distance
+    trail_triggered = use_trail and (entry_price - nz(best_price)) >= trail_activate
+    trail_price := trail_triggered ? trail_candidate : na
+else
+    hard_sl_price := na
+    trail_price   := na
+    be_price      := na
+
+// ============================================================================
+// ORDER EXECUTION
+// ============================================================================
+
+// --- SM Flip exits ---
+if strategy.position_size > 0 and long_exit_sm
+    strategy.close("Long", comment="SM Flip")
+    bars_since_exit := 0
+
+if strategy.position_size < 0 and short_exit_sm
+    strategy.close("Short", comment="SM Flip")
+    bars_since_exit := 0
+
+// --- Hard Stop Loss + Trail + BE via strategy.exit() ---
+if strategy.position_size > 0
+    if use_hard_sl and use_trail and use_be
+        be_active = not na(be_price)
+        if be_active
+            strategy.exit("Long Exit", "Long",
+                 loss=hard_sl_ticks,
+                 trail_points=math.round(trail_activate / syminfo.mintick),
+                 trail_offset=math.round(trail_distance / syminfo.mintick),
+                 stop=be_price,
+                 comment="Stop/Trail/BE")
+        else
+            strategy.exit("Long Exit", "Long",
+                 loss=hard_sl_ticks,
+                 trail_points=math.round(trail_activate / syminfo.mintick),
+                 trail_offset=math.round(trail_distance / syminfo.mintick),
+                 comment="Stop/Trail")
+    else if use_hard_sl and use_trail
+        strategy.exit("Long Exit", "Long",
+             loss=hard_sl_ticks,
+             trail_points=math.round(trail_activate / syminfo.mintick),
+             trail_offset=math.round(trail_distance / syminfo.mintick),
+             comment="Stop/Trail")
+    else if use_hard_sl and use_be
+        be_active = not na(be_price)
+        if be_active
+            strategy.exit("Long Exit", "Long",
+                 loss=hard_sl_ticks,
+                 stop=be_price,
+                 comment="Stop/BE")
+        else
+            strategy.exit("Long Exit", "Long",
+                 loss=hard_sl_ticks,
+                 comment="Hard SL")
+    else if use_hard_sl
+        strategy.exit("Long Exit", "Long",
+             loss=hard_sl_ticks,
+             comment="Hard SL")
+    else if use_trail
+        strategy.exit("Long Exit", "Long",
+             trail_points=math.round(trail_activate / syminfo.mintick),
+             trail_offset=math.round(trail_distance / syminfo.mintick),
+             comment="Trail")
+    else if use_be and not na(be_price)
+        strategy.exit("Long Exit", "Long",
+             stop=be_price,
+             comment="BE")
+
+if strategy.position_size < 0
+    if use_hard_sl and use_trail and use_be
+        be_active = not na(be_price)
+        if be_active
+            strategy.exit("Short Exit", "Short",
+                 loss=hard_sl_ticks,
+                 trail_points=math.round(trail_activate / syminfo.mintick),
+                 trail_offset=math.round(trail_distance / syminfo.mintick),
+                 stop=be_price,
+                 comment="Stop/Trail/BE")
+        else
+            strategy.exit("Short Exit", "Short",
+                 loss=hard_sl_ticks,
+                 trail_points=math.round(trail_activate / syminfo.mintick),
+                 trail_offset=math.round(trail_distance / syminfo.mintick),
+                 comment="Stop/Trail")
+    else if use_hard_sl and use_trail
+        strategy.exit("Short Exit", "Short",
+             loss=hard_sl_ticks,
+             trail_points=math.round(trail_activate / syminfo.mintick),
+             trail_offset=math.round(trail_distance / syminfo.mintick),
+             comment="Stop/Trail")
+    else if use_hard_sl and use_be
+        be_active = not na(be_price)
+        if be_active
+            strategy.exit("Short Exit", "Short",
+                 loss=hard_sl_ticks,
+                 stop=be_price,
+                 comment="Stop/BE")
+        else
+            strategy.exit("Short Exit", "Short",
+                 loss=hard_sl_ticks,
+                 comment="Hard SL")
+    else if use_hard_sl
+        strategy.exit("Short Exit", "Short",
+             loss=hard_sl_ticks,
+             comment="Hard SL")
+    else if use_trail
+        strategy.exit("Short Exit", "Short",
+             trail_points=math.round(trail_activate / syminfo.mintick),
+             trail_offset=math.round(trail_distance / syminfo.mintick),
+             comment="Trail")
+    else if use_be and not na(be_price)
+        strategy.exit("Short Exit", "Short",
+             stop=be_price,
+             comment="BE")
+
+// --- EOD close ---
+if eod_close
+    strategy.close_all(comment="EOD")
+    bars_since_exit := 0
+
+// --- Entries ---
+if long_entry and strategy.position_size == 0
+    strategy.entry("Long", strategy.long)
+    long_used := true
+    bars_since_exit := 9999
+
+if short_entry and strategy.position_size == 0
+    strategy.entry("Short", strategy.short)
+    short_used := true
+    bars_since_exit := 9999
+
+// ============================================================================
+// ALERT CONDITIONS
+// ============================================================================
+alertcondition(long_entry and strategy.position_size == 0,
+     title="Long Entry",
+     message="SM+RSI v10: LONG entry signal on {{ticker}} at {{close}}")
+alertcondition(short_entry and strategy.position_size == 0,
+     title="Short Entry",
+     message="SM+RSI v10: SHORT entry signal on {{ticker}} at {{close}}")
+alertcondition((strategy.position_size > 0 and long_exit_sm) or (strategy.position_size < 0 and short_exit_sm),
+     title="SM Flip Exit",
+     message="SM+RSI v10: SM FLIP exit on {{ticker}} at {{close}}")
+alertcondition(daily_paused,
+     title="Daily Loss Limit Hit",
+     message="SM+RSI v10: DAILY LOSS LIMIT reached on {{ticker}}. New entries paused.")
+alertcondition(consec_paused,
+     title="Consecutive Loss Limit",
+     message="SM+RSI v10: Consecutive loss limit reached. New entries paused.")
+
+// ============================================================================
+// PLOTS
+// ============================================================================
+
+// SM background color
+var color sm_bg_col = na
+if sm_net_index > sm_threshold
+    sm_bg_col := color.new(color.green, 85)
+else if sm_net_index < -sm_threshold
+    sm_bg_col := color.new(color.red, 85)
+else
+    sm_bg_col := color.new(color.gray, 95)
+bgcolor(show_sm_bg ? sm_bg_col : na)
+
+// Entry signals
+plotshape(show_signals and long_entry, title="Long", style=shape.triangleup, location=location.belowbar, color=color.green, size=size.small, text="L")
+plotshape(show_signals and short_entry, title="Short", style=shape.triangledown, location=location.abovebar, color=color.red, size=size.small, text="S")
+
+// SM flip markers
+plotshape(show_signals and sm_flipped_bull and strategy.position_size < 0, title="SM Bull", style=shape.xcross, location=location.abovebar, color=color.lime, size=size.tiny)
+plotshape(show_signals and sm_flipped_bear and strategy.position_size > 0, title="SM Bear", style=shape.xcross, location=location.belowbar, color=color.orange, size=size.tiny)
+
+// SM Net Index plot (lower pane)
+sm_plot_col = sm_net_index > 0 ? color.green : color.red
+plot(show_sm_net ? sm_net_index : na, "SM Net Index", color=sm_plot_col, linewidth=2, display=display.pane)
+hline(0, "Zero", color=color.gray, linestyle=hline.style_dotted)
+
+// Stop level lines
+plot(show_stops and not na(hard_sl_price) ? hard_sl_price : na,
+     "Hard SL", color=color.red, linewidth=1, style=plot.style_linebr)
+plot(show_stops and not na(trail_price) ? trail_price : na,
+     "Trail Stop", color=color.orange, linewidth=1, style=plot.style_linebr)
+plot(show_stops and not na(be_price) ? be_price : na,
+     "BE Stop", color=color.blue, linewidth=1, style=plot.style_linebr)
+
+// ============================================================================
+// WARNING TABLE (volume check instead of link check)
+// ============================================================================
+var table warn_tbl = table.new(position.bottom_center, 1, 1)
+if barstate.islast
+    if not has_volume
+        table.cell(warn_tbl, 0, 0, "  NO VOLUME DATA — SM INDICATOR NEEDS VOLUME  ", text_color=color.white, bgcolor=color.red, text_size=size.normal)
+    else
+        table.cell(warn_tbl, 0, 0, "", bgcolor=color.new(color.black, 100))
+
+// ============================================================================
+// LIVE DASHBOARD
+// ============================================================================
+if show_dashboard and barstate.islast
+    var table dash = table.new(position.top_right, 2, 16, bgcolor=color.new(color.black, 80), border_width=1)
+
+    // Row 0: Version
+    table.cell(dash, 0, 0, "v10 Standalone", text_color=color.white, text_size=size.small)
+    table.cell(dash, 1, 0, has_volume ? "Vol OK" : "NO VOL",
+         text_color=has_volume ? color.green : color.red, text_size=size.small)
+
+    // Row 1: SM Value
+    table.cell(dash, 0, 1, "SM Index", text_color=color.gray, text_size=size.small)
+    sm_col = sm_net_index > 0 ? color.green : sm_net_index < 0 ? color.red : color.gray
+    table.cell(dash, 1, 1, str.tostring(sm_net_index, "#.###"), text_color=sm_col, text_size=size.small)
+
+    // Row 2: RSI Value
+    table.cell(dash, 0, 2, "5m RSI", text_color=color.gray, text_size=size.small)
+    rsi_col = rsi_5m > rsi_buy ? color.green : rsi_5m < rsi_sell ? color.red : color.white
+    table.cell(dash, 1, 2, str.tostring(rsi_5m, "#.#"), text_color=rsi_col, text_size=size.small)
+
+    // Row 3: Position
+    table.cell(dash, 0, 3, "Position", text_color=color.gray, text_size=size.small)
+    pos_text = strategy.position_size > 0 ? "LONG" : strategy.position_size < 0 ? "SHORT" : "FLAT"
+    pos_col = strategy.position_size > 0 ? color.green : strategy.position_size < 0 ? color.red : color.gray
+    table.cell(dash, 1, 3, pos_text, text_color=pos_col, text_size=size.small)
+
+    // Row 4: Open P&L
+    table.cell(dash, 0, 4, "Open P&L", text_color=color.gray, text_size=size.small)
+    open_pnl = strategy.openprofit
+    pnl_col = open_pnl > 0 ? color.green : open_pnl < 0 ? color.red : color.gray
+    table.cell(dash, 1, 4, "$" + str.tostring(open_pnl, "#.##"), text_color=pnl_col, text_size=size.small)
+
+    // Row 5: Hard SL
+    table.cell(dash, 0, 5, "Hard SL", text_color=color.gray, text_size=size.small)
+    if use_hard_sl
+        sl_dist_text = str.tostring(hard_sl_pts, "#.#") + " pts"
+        if sl_mode == "ATR"
+            sl_dist_text := sl_dist_text + " (ATR)"
+        table.cell(dash, 1, 5, sl_dist_text, text_color=color.yellow, text_size=size.small)
+    else
+        table.cell(dash, 1, 5, "OFF", text_color=color.gray, text_size=size.small)
+
+    // Row 6: Trail Status
+    table.cell(dash, 0, 6, "Trail", text_color=color.gray, text_size=size.small)
+    if not use_trail
+        table.cell(dash, 1, 6, "OFF", text_color=color.gray, text_size=size.small)
+    else
+        trail_status = not na(trail_price) ? "ACTIVE" : strategy.position_size != 0 ? "ARMED" : "OFF"
+        trail_s_col = trail_status == "ACTIVE" ? color.orange : trail_status == "ARMED" ? color.yellow : color.gray
+        table.cell(dash, 1, 6, trail_status, text_color=trail_s_col, text_size=size.small)
+
+    // Row 7: BE Status
+    table.cell(dash, 0, 7, "Breakeven", text_color=color.gray, text_size=size.small)
+    if not use_be
+        table.cell(dash, 1, 7, "OFF", text_color=color.gray, text_size=size.small)
+    else
+        be_status = not na(be_price) ? "LOCKED" : strategy.position_size != 0 ? "ARMED" : "OFF"
+        be_s_col = be_status == "LOCKED" ? color.blue : be_status == "ARMED" ? color.yellow : color.gray
+        table.cell(dash, 1, 7, be_status, text_color=be_s_col, text_size=size.small)
+
+    // Row 8: Separator
+    table.cell(dash, 0, 8, "--- Daily ---", text_color=color.gray, text_size=size.small)
+    table.cell(dash, 1, 8, "", text_size=size.small)
+
+    // Row 9: Daily P&L
+    table.cell(dash, 0, 9, "Day P&L", text_color=color.gray, text_size=size.small)
+    dpnl_col = day_pnl > 0 ? color.green : day_pnl < 0 ? color.red : color.gray
+    table.cell(dash, 1, 9, "$" + str.tostring(day_pnl, "#.##") + " (" + str.tostring(day_pnl_pct, "#.##") + "%)",
+         text_color=dpnl_col, text_size=size.small)
+
+    // Row 10: Day Trades W/L
+    table.cell(dash, 0, 10, "Day W/L", text_color=color.gray, text_size=size.small)
+    table.cell(dash, 1, 10, str.tostring(day_wins) + "W / " + str.tostring(day_losses) + "L",
+         text_color=color.white, text_size=size.small)
+
+    // Row 11: Consecutive Losses
+    table.cell(dash, 0, 11, "Consec L", text_color=color.gray, text_size=size.small)
+    cl_col = consec_losses >= 3 ? color.orange : consec_losses >= 2 ? color.yellow : color.white
+    cl_text = str.tostring(consec_losses)
+    if max_consec_losses > 0
+        cl_text := cl_text + " / " + str.tostring(max_consec_losses)
+    table.cell(dash, 1, 11, cl_text, text_color=cl_col, text_size=size.small)
+
+    // Row 12: Risk Status
+    table.cell(dash, 0, 12, "Risk", text_color=color.gray, text_size=size.small)
+    if daily_paused
+        table.cell(dash, 1, 12, "DAILY LIMIT", text_color=color.red, text_size=size.small)
+    else if consec_paused
+        table.cell(dash, 1, 12, "CONSEC LIMIT", text_color=color.red, text_size=size.small)
+    else
+        table.cell(dash, 1, 12, "OK", text_color=color.green, text_size=size.small)
+
+    // Row 13: Separator
+    table.cell(dash, 0, 13, "--- Config ---", text_color=color.gray, text_size=size.small)
+    table.cell(dash, 1, 13, "", text_size=size.small)
+
+    // Row 14: RSI Config
+    table.cell(dash, 0, 14, "RSI Cfg", text_color=color.gray, text_size=size.small)
+    rsi_label = "RSI" + str.tostring(rsi_len) + " " + str.tostring(rsi_buy) + "/" + str.tostring(rsi_sell)
+    table.cell(dash, 1, 14, rsi_label, text_color=color.yellow, text_size=size.small)
+
+    // Row 15: SM Config + Cooldown
+    table.cell(dash, 0, 15, "SM / CD", text_color=color.gray, text_size=size.small)
+    table.cell(dash, 1, 15, str.tostring(sm_index_len) + "/" + str.tostring(sm_flow_len) + "/" + str.tostring(sm_norm_len) + " CD" + str.tostring(cooldown),
+         text_color=color.white, text_size=size.small)

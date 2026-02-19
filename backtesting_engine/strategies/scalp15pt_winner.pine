@@ -1,0 +1,166 @@
+// ═══════════════════════════════════════════════════════════════════════════
+// 15-Point Scalper — SM_med + RSI 14 (65/35)
+// ═══════════════════════════════════════════════════════════════════════════
+// Backtest winner: PF 2.751 | WR 58.8% | 17 trades / 7 days
+// SM params: Index=20, Flow=12, Norm=400, EMA=200
+// RSI 14, Buy=65, Sell=35, SM threshold > 0.10
+// TP 15 / SL 7 | NY session only (9:30 AM - 4:00 PM ET)
+// Avg hold: ~1 bar (5 min) — true in-and-out scalper
+//
+// Apply to 5-MINUTE MNQ chart.
+// ═══════════════════════════════════════════════════════════════════════════
+
+//@version=6
+strategy("15pt Scalper — SM_med RSI14", overlay=true, initial_capital=1000,
+     default_qty_type=strategy.fixed, default_qty_value=1,
+     commission_type=strategy.commission.cash_per_contract, commission_value=0.52,
+     slippage=0, margin_long=0, margin_short=0,
+     calc_on_every_tick=false, fill_orders_on_standard_ohlc=true)
+
+// ─── Inputs ──────────────────────────────────────────────────────────────────
+grp_sm  = "Smart Money Settings"
+sm_index_period  = input.int(20,  "SM Index Period",         minval=1, group=grp_sm)
+sm_flow_period   = input.int(12,  "SM Volume Flow Period",   minval=1, group=grp_sm)
+sm_norm_period   = input.int(400, "SM Normalization Period",  minval=1, group=grp_sm)
+sm_ema_len       = input.int(200, "SM EMA Length",            minval=1, group=grp_sm)
+sm_threshold     = input.float(0.10, "SM Net Index Threshold", minval=0, step=0.01, group=grp_sm)
+
+grp_rsi = "RSI Settings"
+rsi_len    = input.int(14,   "RSI Length",     minval=1,  group=grp_rsi)
+rsi_buy    = input.float(65, "RSI Buy Level",             group=grp_rsi)
+rsi_sell   = input.float(35, "RSI Sell Level",            group=grp_rsi)
+
+grp_exit = "Exit Settings"
+tp_pts = input.float(15, "Take Profit (points)", group=grp_exit)
+sl_pts = input.float(7,  "Stop Loss (points)",   group=grp_exit)
+
+grp_sess = "Session Filter"
+use_session = input.bool(true, "NY Session Only", group=grp_sess)
+sess_start  = input.session("0930-1545", "Entry Window (ET)", group=grp_sess)
+
+grp_disp = "Display"
+show_signals  = input.bool(true,  "Show Entry Signals",   group=grp_disp)
+show_bg       = input.bool(true,  "Show SM Background",   group=grp_disp)
+show_sm_plot  = input.bool(false, "Show SM Net Index (lower pane)", group=grp_disp)
+
+// ─── Manual PVI / NVI Calculation ────────────────────────────────────────────
+// MNQ futures: PVI updates when volume rises, NVI when volume falls
+// This replicates the AlgoAlpha Smart Money indicator logic
+
+var float pvi = 1.0
+var float nvi = 1.0
+
+float pct_change = close[1] != 0 ? (close - close[1]) / close[1] : 0.0
+
+if bar_index > 0
+    if volume > volume[1]
+        pvi := pvi[1] + pct_change * pvi[1]
+        nvi := nvi[1]
+    else if volume < volume[1]
+        nvi := nvi[1] + pct_change * nvi[1]
+        pvi := pvi[1]
+    else
+        pvi := pvi[1]
+        nvi := nvi[1]
+
+// ─── Smart Money Volume Index ────────────────────────────────────────────────
+dumb  = pvi - ta.ema(pvi, sm_ema_len)
+smart = nvi - ta.ema(nvi, sm_ema_len)
+
+drsi = ta.rsi(dumb, sm_flow_period)
+srsi = ta.rsi(smart, sm_flow_period)
+
+// Buy/sell ratios (protect division by zero)
+r_buy  = nz(drsi) != 0 ? nz(srsi) / nz(drsi) : 0.0
+r_sell = (100 - nz(drsi)) != 0 ? (100 - nz(srsi)) / (100 - nz(drsi)) : 0.0
+
+sums_buy  = math.sum(r_buy, sm_index_period)
+sums_sell = math.sum(r_sell, sm_index_period)
+peak      = ta.highest(math.max(sums_buy, sums_sell), sm_norm_period)
+
+index_buy  = peak != 0 ? sums_buy / peak : 0.0
+index_sell = peak != 0 ? sums_sell / peak : 0.0
+net_index  = index_buy - index_sell
+
+// ─── RSI ─────────────────────────────────────────────────────────────────────
+rsi_val = ta.rsi(close, rsi_len)
+
+rsi_cross_up = ta.crossover(rsi_val, rsi_buy)    // RSI crosses above 65
+rsi_cross_dn = ta.crossunder(rsi_val, rsi_sell)   // RSI crosses below 35
+
+// ─── Session Filter ──────────────────────────────────────────────────────────
+// Only allow new entries during NY session (9:30 AM - 3:45 PM ET)
+in_session = use_session ? not na(time(timeframe.period, sess_start, "America/New_York")) : true
+
+// ─── Entry Conditions ────────────────────────────────────────────────────────
+sm_bullish = net_index > sm_threshold
+sm_bearish = net_index < -sm_threshold
+
+long_signal  = rsi_cross_up and sm_bullish and in_session
+short_signal = rsi_cross_dn and sm_bearish and in_session
+
+// ─── Strategy Execution ──────────────────────────────────────────────────────
+if long_signal
+    strategy.entry("Long", strategy.long)
+
+if short_signal
+    strategy.entry("Short", strategy.short)
+
+// TP/SL exits (converted to ticks: 1 point = 1/mintick ticks)
+if strategy.position_size > 0
+    strategy.exit("Long TP/SL", "Long",
+         profit = tp_pts / syminfo.mintick,
+         loss   = sl_pts / syminfo.mintick)
+
+if strategy.position_size < 0
+    strategy.exit("Short TP/SL", "Short",
+         profit = tp_pts / syminfo.mintick,
+         loss   = sl_pts / syminfo.mintick)
+
+// Force close at end of session (4:00 PM ET)
+if use_session and na(time(timeframe.period, "0930-1600", "America/New_York")) and strategy.position_size != 0
+    strategy.close_all("EOD Close")
+
+// ─── Visual Signals ──────────────────────────────────────────────────────────
+plotshape(show_signals and long_signal ? low : na, title="Long",
+     style=shape.triangleup, location=location.belowbar,
+     color=color.new(#00e676, 0), size=size.small, text="L")
+
+plotshape(show_signals and short_signal ? high : na, title="Short",
+     style=shape.triangledown, location=location.abovebar,
+     color=color.new(#ff1744, 0), size=size.small, text="S")
+
+// SM background tint
+sm_bg = show_bg ? (sm_bullish ? color.new(#00e676, 93) : sm_bearish ? color.new(#ff1744, 93) : na) : na
+bgcolor(sm_bg, title="SM Direction")
+
+// Color bars by RSI state
+bar_col = rsi_val > rsi_buy ? color.new(#2196f3, 30) : rsi_val < rsi_sell ? color.new(#e040fb, 30) : na
+barcolor(bar_col, title="RSI State")
+
+// ─── Lower Pane Debug Plots ──────────────────────────────────────────────────
+plot(show_sm_plot ? net_index : na, "SM Net Index",
+     color=net_index > 0 ? #00e676 : #ff1744, linewidth=2)
+hline(0, "Zero", color=color.gray, linestyle=hline.style_dotted)
+plot(show_sm_plot ? sm_threshold : na, "SM+ Threshold",
+     color=color.new(color.green, 70), linewidth=1, style=plot.style_circles)
+plot(show_sm_plot ? -sm_threshold : na, "SM- Threshold",
+     color=color.new(color.red, 70), linewidth=1, style=plot.style_circles)
+
+// ─── Info Table ──────────────────────────────────────────────────────────────
+var table info = table.new(position.top_right, 2, 7, bgcolor=color.new(#1e1e1e, 10))
+if barstate.islast
+    table.cell(info, 0, 0, "15pt Scalper", text_color=color.white, text_size=size.small)
+    table.cell(info, 1, 0, "SM_med", text_color=#00e676, text_size=size.small)
+    table.cell(info, 0, 1, "SM", text_color=color.gray, text_size=size.tiny)
+    table.cell(info, 1, 1, str.tostring(sm_index_period) + "/" + str.tostring(sm_flow_period) + "/" + str.tostring(sm_norm_period) + "/" + str.tostring(sm_ema_len), text_color=color.white, text_size=size.tiny)
+    table.cell(info, 0, 2, "RSI", text_color=color.gray, text_size=size.tiny)
+    table.cell(info, 1, 2, str.tostring(rsi_len) + " (" + str.tostring(rsi_buy, "#") + "/" + str.tostring(rsi_sell, "#") + ")", text_color=color.white, text_size=size.tiny)
+    table.cell(info, 0, 3, "TP/SL", text_color=color.gray, text_size=size.tiny)
+    table.cell(info, 1, 3, str.tostring(tp_pts, "#") + " / " + str.tostring(sl_pts, "#"), text_color=color.white, text_size=size.tiny)
+    table.cell(info, 0, 4, "SM Net", text_color=color.gray, text_size=size.tiny)
+    table.cell(info, 1, 4, str.tostring(net_index, "#.###"), text_color=net_index > sm_threshold ? #00e676 : net_index < -sm_threshold ? #ff1744 : color.gray, text_size=size.tiny)
+    table.cell(info, 0, 5, "RSI", text_color=color.gray, text_size=size.tiny)
+    table.cell(info, 1, 5, str.tostring(rsi_val, "#.#"), text_color=rsi_val > rsi_buy ? #2196f3 : rsi_val < rsi_sell ? #e040fb : color.white, text_size=size.tiny)
+    table.cell(info, 0, 6, "Session", text_color=color.gray, text_size=size.tiny)
+    table.cell(info, 1, 6, in_session ? "OPEN" : "CLOSED", text_color=in_session ? #00e676 : #ff1744, text_size=size.tiny)

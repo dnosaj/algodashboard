@@ -1,0 +1,274 @@
+// SM+RSI v11 Standalone -- Self-contained Smart Money + RSI Strategy
+// No external indicators required. SM computed natively from AlgoAlpha's
+// open-source algorithm (Mozilla Public License 2.0).
+//
+// Key difference from v9.4/v10: SM params are configurable and default to
+// the sweep-optimized values (10/12/200/100) instead of AlgoAlpha defaults
+// (25/14/500/255). The sweep found index=10 and ema=100 flip the strategy
+// from -$984 to +$4,567 over 6 months (Aug 2025 - Feb 2026).
+//
+// 6-month backtest (Databento MNQ 1-min, 172K bars):
+//   v9.4 (AA defaults):  345 trades, 52.5% WR, PF 0.906, -$984,  DD -$2,163
+//   v11 (optimized):     368 trades, 57.9% WR, PF 1.669, +$4,567, DD -$567
+//
+// Architecture: 1-MIN chart. SM computed on 1-min. RSI on 5-min via
+// request.security(). Entry on SM direction + RSI cross. Exit on SM flip.
+//
+// SETUP:
+//   1. Open MNQ (or MES) on a 1-MINUTE chart
+//   2. Add this strategy -- NO other indicators needed
+//   3. Scroll chart left to load 500+ bars of history
+//   4. Check Properties tab after loading (TV resets date range)
+//
+//@version=6
+strategy("SM+RSI v11 Standalone", overlay=true,
+     initial_capital=1000,
+     default_qty_type=strategy.fixed,
+     default_qty_value=1,
+     commission_type=strategy.commission.cash_per_contract,
+     commission_value=0.52,
+     slippage=0,
+     margin_long=0,
+     margin_short=0,
+     process_orders_on_close=false,
+     calc_on_every_tick=false,
+     fill_orders_on_standard_ohlc=true,
+     max_bars_back=5000)
+
+// --- Input Groups ---
+grp_sm   = "SMART MONEY (built-in, AlgoAlpha algorithm)"
+grp_rsi  = "RSI SETTINGS (5-min)"
+grp_exit = "EXIT SETTINGS"
+grp_sess = "SESSION FILTER"
+grp_disp = "DISPLAY"
+
+// --- SM Inputs (configurable -- AlgoAlpha hardcodes ema at 255) ---
+sm_index   = input.int(10,  "SM Index Period",   minval=1, maxval=50,  group=grp_sm,
+     tooltip="Summation period for buy/sell interest. Default 10 (AA default=25). Lower = faster response.")
+sm_flow    = input.int(12,  "SM Flow Period",    minval=1, maxval=50,  group=grp_sm,
+     tooltip="RSI period on volume flow. Default 12 (AA default=14).")
+sm_norm    = input.int(200, "SM Norm Period",    minval=50, maxval=1000, group=grp_sm,
+     tooltip="Lookback for peak normalization. Default 200 (AA default=500). Not very sensitive.")
+sm_ema_len = input.int(100, "SM EMA Length",     minval=10, maxval=500, group=grp_sm,
+     tooltip="EMA smoothing on PVI/NVI. Default 100 (AA hardcodes 255). Lower = faster SM direction changes.")
+sm_threshold = input.float(0.00, "SM Threshold", minval=0, step=0.05, group=grp_sm,
+     tooltip="Min |SM| to confirm direction. 0 = any non-zero SM.")
+
+// --- RSI Inputs (computed on 5-min) ---
+rsi_len     = input.int(8,   "RSI Length",     minval=2,  maxval=50, group=grp_rsi,
+     tooltip="RSI period on 5-min bars. Default 8 (was 10 in v9.4).")
+rsi_buy     = input.int(60,  "RSI Buy Level",  minval=50, maxval=90, group=grp_rsi,
+     tooltip="RSI must cross above this for long entry. Default 60 (was 55 in v9.4).")
+rsi_sell    = input.int(40,  "RSI Sell Level",  minval=10, maxval=50, group=grp_rsi,
+     tooltip="RSI must cross below this for short entry. Default 40 (was 45 in v9.4).")
+
+// --- Exit Inputs ---
+max_loss_pts = input.int(50, "Max Loss Stop (points, 0=disabled)", minval=0, step=5, group=grp_exit,
+     tooltip="Hard stop loss in points. 50 recommended for MNQ. 0 = pure SM flip exit.")
+cooldown     = input.int(20, "Cooldown Bars (1-min bars)", minval=0, maxval=150, group=grp_exit,
+     tooltip="Bars to wait after exit. Default 20 (was 15 in v9.4).")
+
+// --- Session Inputs ---
+use_session = input.bool(true, "NY Session Only", group=grp_sess)
+sess_start  = input.session("1000-1545", "Entry Window (ET)",     group=grp_sess)
+sess_close  = input.session("0930-1600", "Session Close Window (ET)", group=grp_sess)
+
+// --- Display Inputs ---
+show_signals = input.bool(true, "Show Entry Signals",  group=grp_disp)
+show_sm_bg   = input.bool(true, "Show SM Background",  group=grp_disp)
+show_sm_net  = input.bool(true, "Show SM Net Index",   group=grp_disp)
+show_diag    = input.bool(false, "Show SM Diagnostics", group=grp_disp,
+     tooltip="Debug table showing raw SM intermediate values for cross-referencing with Python backtest.")
+
+// ============================================================================
+// SMART MONEY -- computed natively (AlgoAlpha algorithm, MPL 2.0)
+// ============================================================================
+// PVI/NVI with configurable EMA (AlgoAlpha hardcodes 255)
+dumb  = ta.pvi - ta.ema(ta.pvi, sm_ema_len)
+smart = ta.nvi - ta.ema(ta.nvi, sm_ema_len)
+
+// RSI on smart/dumb deviation
+drsi = ta.rsi(dumb, sm_flow)
+srsi = ta.rsi(smart, sm_flow)
+
+// Buy/sell ratios
+r_buy  = srsi / drsi
+r_sell = (100 - srsi) / (100 - drsi)
+
+// Summation and normalization
+sums_buy  = math.sum(r_buy, sm_index)
+sums_sell = math.sum(r_sell, sm_index)
+peak      = ta.highest(math.max(sums_buy, sums_sell), sm_norm)
+
+index_buy  = peak != 0 ? sums_buy / peak : 0.0
+index_sell = peak != 0 ? sums_sell / peak : 0.0
+sm_net_index = index_buy - index_sell
+
+// SM direction
+sm_bull = sm_net_index > sm_threshold
+sm_bear = sm_net_index < -sm_threshold
+
+// SM flip (cross zero)
+sm_flipped_bull = sm_net_index > 0 and sm_net_index[1] <= 0
+sm_flipped_bear = sm_net_index < 0 and sm_net_index[1] >= 0
+
+// ============================================================================
+// RSI -- computed on 5-min via request.security()
+// ============================================================================
+rsi_5m = request.security(syminfo.tickerid, "5", ta.rsi(close, rsi_len), lookahead=barmerge.lookahead_off)
+rsi_5m_prev = request.security(syminfo.tickerid, "5", ta.rsi(close, rsi_len)[1], lookahead=barmerge.lookahead_off)
+
+rsi_cross_up   = rsi_5m > rsi_buy and rsi_5m_prev <= rsi_buy
+rsi_cross_down = rsi_5m < rsi_sell and rsi_5m_prev >= rsi_sell
+
+// ============================================================================
+// ENTRY/EXIT LOGIC
+// ============================================================================
+
+// Episode logic -- only one entry per SM episode
+var bool long_used  = false
+var bool short_used = false
+
+if not sm_bull or sm_flipped_bear
+    long_used := false
+if not sm_bear or sm_flipped_bull
+    short_used := false
+
+// Session filter
+in_entry_window = not use_session or not na(time(timeframe.period, sess_start, "America/New_York"))
+in_session      = not use_session or not na(time(timeframe.period, sess_close, "America/New_York"))
+
+// Cooldown (in 1-min bars)
+var int bars_since_exit = 9999
+bars_since_exit += 1
+cooldown_ok = bars_since_exit >= cooldown
+
+// Entry signals: SM direction (1-min) + RSI cross (5-min)
+long_entry  = sm_bull and rsi_cross_up   and not long_used  and in_entry_window and cooldown_ok
+short_entry = sm_bear and rsi_cross_down and not short_used and in_entry_window and cooldown_ok
+
+// Exit signals
+long_exit_sm  = sm_flipped_bear
+short_exit_sm = sm_flipped_bull
+eod_close = strategy.position_size != 0 and not in_session
+
+// SM Flip exit for longs
+if strategy.position_size > 0 and long_exit_sm
+    strategy.close("Long", comment="SM Flip")
+    bars_since_exit := 0
+
+// SM Flip exit for shorts
+if strategy.position_size < 0 and short_exit_sm
+    strategy.close("Short", comment="SM Flip")
+    bars_since_exit := 0
+
+// Max loss exit -- FULLY GATED
+if max_loss_pts > 0
+    if strategy.position_size > 0 and close <= strategy.position_avg_price - max_loss_pts
+        strategy.close("Long", comment="Max Loss")
+        bars_since_exit := 0
+    if strategy.position_size < 0 and close >= strategy.position_avg_price + max_loss_pts
+        strategy.close("Short", comment="Max Loss")
+        bars_since_exit := 0
+
+// EOD close
+if eod_close
+    strategy.close_all(comment="EOD")
+    bars_since_exit := 0
+
+// Entries
+if long_entry and strategy.position_size == 0
+    strategy.entry("Long", strategy.long)
+    long_used := true
+    bars_since_exit := 9999
+
+if short_entry and strategy.position_size == 0
+    strategy.entry("Short", strategy.short)
+    short_used := true
+    bars_since_exit := 9999
+
+// ============================================================================
+// PLOTS
+// ============================================================================
+
+// SM background color
+var color sm_bg_col = na
+if sm_net_index > sm_threshold
+    sm_bg_col := color.new(color.green, 85)
+else if sm_net_index < -sm_threshold
+    sm_bg_col := color.new(color.red, 85)
+else
+    sm_bg_col := color.new(color.gray, 95)
+bgcolor(show_sm_bg ? sm_bg_col : na)
+
+// Entry signals
+plotshape(show_signals and long_entry, title="Long", style=shape.triangleup, location=location.belowbar, color=color.green, size=size.small, text="L")
+plotshape(show_signals and short_entry, title="Short", style=shape.triangledown, location=location.abovebar, color=color.red, size=size.small, text="S")
+
+// SM flip markers
+plotshape(show_signals and sm_flipped_bull and strategy.position_size < 0, title="SM Bull", style=shape.xcross, location=location.abovebar, color=color.lime, size=size.tiny)
+plotshape(show_signals and sm_flipped_bear and strategy.position_size > 0, title="SM Bear", style=shape.xcross, location=location.belowbar, color=color.orange, size=size.tiny)
+
+// SM Net Index plot (lower pane)
+sm_plot_col = sm_net_index > 0 ? color.green : color.red
+plot(show_sm_net ? sm_net_index : na, "SM Net Index", color=sm_plot_col, linewidth=2, display=display.pane)
+hline(0, "Zero", color=color.gray, linestyle=hline.style_dotted)
+
+// Info table
+var table info = table.new(position.top_right, 2, 8, bgcolor=color.new(color.black, 80))
+if barstate.islastconfirmedhistory
+    table.cell(info, 0, 0, "v11 Standalone", text_color=color.white, text_size=size.small)
+    table.cell(info, 1, 0, "SM Built-In", text_color=color.green, text_size=size.small)
+    table.cell(info, 0, 1, "SM Idx/Flw", text_color=color.gray, text_size=size.small)
+    table.cell(info, 1, 1, str.tostring(sm_index) + "/" + str.tostring(sm_flow), text_color=color.white, text_size=size.small)
+    table.cell(info, 0, 2, "SM Nrm/EMA", text_color=color.gray, text_size=size.small)
+    table.cell(info, 1, 2, str.tostring(sm_norm) + "/" + str.tostring(sm_ema_len), text_color=color.white, text_size=size.small)
+    table.cell(info, 0, 3, "Cooldown", text_color=color.gray, text_size=size.small)
+    table.cell(info, 1, 3, str.tostring(cooldown) + " bars", text_color=color.white, text_size=size.small)
+    table.cell(info, 0, 4, "Max Loss", text_color=color.gray, text_size=size.small)
+    ml_text = max_loss_pts > 0 ? str.tostring(max_loss_pts) + " pts" : "OFF"
+    ml_col = max_loss_pts > 0 ? color.yellow : color.gray
+    table.cell(info, 1, 4, ml_text, text_color=ml_col, text_size=size.small)
+    table.cell(info, 0, 5, "SM Now", text_color=color.gray, text_size=size.small)
+    sm_col = sm_net_index > 0 ? color.green : color.red
+    table.cell(info, 1, 5, str.tostring(sm_net_index, "#.###"), text_color=sm_col, text_size=size.small)
+    table.cell(info, 0, 6, "5m RSI", text_color=color.gray, text_size=size.small)
+    rsi_col = color.white
+    if rsi_5m > rsi_buy
+        rsi_col := color.green
+    else if rsi_5m < rsi_sell
+        rsi_col := color.red
+    table.cell(info, 1, 6, str.tostring(rsi_5m, "#.#"), text_color=rsi_col, text_size=size.small)
+    rsi_label = "RSI" + str.tostring(rsi_len) + " " + str.tostring(rsi_buy) + "/" + str.tostring(rsi_sell)
+    table.cell(info, 0, 7, "RSI Cfg", text_color=color.gray, text_size=size.small)
+    table.cell(info, 1, 7, rsi_label, text_color=color.yellow, text_size=size.small)
+
+// SM Diagnostics table (bottom-left, toggleable)
+// Shows intermediate SM values on the LAST bar for cross-referencing Python
+var table diag = table.new(position.bottom_left, 2, 12, bgcolor=color.new(color.black, 80))
+if show_diag and barstate.islastconfirmedhistory
+    table.cell(diag, 0, 0, "SM DIAGNOSTICS", text_color=color.yellow, text_size=size.small)
+    table.cell(diag, 1, 0, "Last Bar", text_color=color.gray, text_size=size.small)
+    table.cell(diag, 0, 1, "PVI", text_color=color.gray, text_size=size.small)
+    table.cell(diag, 1, 1, str.tostring(ta.pvi, "#.####"), text_color=color.white, text_size=size.small)
+    table.cell(diag, 0, 2, "NVI", text_color=color.gray, text_size=size.small)
+    table.cell(diag, 1, 2, str.tostring(ta.nvi, "#.####"), text_color=color.white, text_size=size.small)
+    table.cell(diag, 0, 3, "Dumb", text_color=color.gray, text_size=size.small)
+    table.cell(diag, 1, 3, str.tostring(dumb, "#.######"), text_color=color.white, text_size=size.small)
+    table.cell(diag, 0, 4, "Smart", text_color=color.gray, text_size=size.small)
+    table.cell(diag, 1, 4, str.tostring(smart, "#.######"), text_color=color.white, text_size=size.small)
+    table.cell(diag, 0, 5, "dRSI", text_color=color.gray, text_size=size.small)
+    table.cell(diag, 1, 5, str.tostring(drsi, "#.##"), text_color=color.white, text_size=size.small)
+    table.cell(diag, 0, 6, "sRSI", text_color=color.gray, text_size=size.small)
+    table.cell(diag, 1, 6, str.tostring(srsi, "#.##"), text_color=color.white, text_size=size.small)
+    table.cell(diag, 0, 7, "SumBuy", text_color=color.gray, text_size=size.small)
+    table.cell(diag, 1, 7, str.tostring(sums_buy, "#.####"), text_color=color.white, text_size=size.small)
+    table.cell(diag, 0, 8, "SumSell", text_color=color.gray, text_size=size.small)
+    table.cell(diag, 1, 8, str.tostring(sums_sell, "#.####"), text_color=color.white, text_size=size.small)
+    table.cell(diag, 0, 9, "Peak", text_color=color.gray, text_size=size.small)
+    table.cell(diag, 1, 9, str.tostring(peak, "#.####"), text_color=color.white, text_size=size.small)
+    table.cell(diag, 0, 10, "SM Net", text_color=color.gray, text_size=size.small)
+    sm_diag_col = sm_net_index > 0 ? color.green : color.red
+    table.cell(diag, 1, 10, str.tostring(sm_net_index, "#.######"), text_color=sm_diag_col, text_size=size.small)
+    table.cell(diag, 0, 11, "5m RSI", text_color=color.gray, text_size=size.small)
+    table.cell(diag, 1, 11, str.tostring(rsi_5m, "#.##"), text_color=color.white, text_size=size.small)

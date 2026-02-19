@@ -1,0 +1,15 @@
+//@version=3
+study(title="Chop and explode", shorttitle="CAE")
+
+src = close, len = input(14, minval=1, title="Length")
+up = rma(max(change(src), 0), len)
+down = rma(-min(change(src), 0), len)
+rsi = down == 0 ? 100 : up == 0 ? 0 : 100 - (100 / (1 + up / down))
+
+plot(rsi, color=black)
+
+change1 = rsi > 60 ? blue :na
+change2= rsi < 40 ? purple: na
+
+p1 = plot(rsi, style=linebr, linewidth=3, color=change1)
+p2 = plot(rsi, style=linebr, linewidth=3, color=change2)

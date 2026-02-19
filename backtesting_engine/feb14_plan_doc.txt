@@ -1,0 +1,306 @@
+v10 Feature Validation & Stress Test Suite                                                                                                                                                         │
+│                                                                                                                                                                                                    │
+│ Context                                                                                                                                                                                            │
+│                                                                                                                                                                                                    │
+│ You're forward-testing v9.4 next week and want rigorous, data-driven proof (or disproof) of the v10 feature candidates from the market structure research before committing anything to Pine. The  │
+│ current data covers ~20 trading days of 1-min with AlgoAlpha SM, and ~55 trading days of 5-min prebaked SM. With only 44-57 trades in the baseline, every test needs to account for small-sample   │
+│ risk.                                                                                                                                                                                              │
+│                                                                                                                                                                                                    │
+│ New data files (Feb 14) with VWAP, Volume, AND AlgoAlpha SM:                                                                                                                                       │
+│ - CME_MINI_MNQ1!, 1_b2119.csv — MNQ 1-min, Jan 25 - Feb 13, 20,695 bars, OHLC + VWAP + Volume + SM                                                                                                 │
+│ - CME_MINI_MES1!, 1_cca38.csv — MES 1-min, Jan 25 - Feb 13, 20,699 bars, OHLC + VWAP + Volume + SM                                                                                                 │
+│                                                                                                                                                                                                    │
+│ Column order: time, open, high, low, close, VWAP, Upper Band #1, Lower Band #1, Volume, Long, Short, SM Bull, SM Bear, SM Net Index, Zero Line, Buy Interest, Sell Interest, Net Buy 100-20, Net   │
+│ Buy Line, Net Sell 100-20, Net Sell Line                                                                                                                                                           │
+│                                                                                                                                                                                                    │
+│ These are now the primary data files for all testing — they have real volume and TradingView-computed VWAP.                                                                                        │
+│                                                                                                                                                                                                    │
+│ Problem: Fragmented Engine Copies                                                                                                                                                                  │
+│                                                                                                                                                                                                    │
+│ There are 6+ separate copies of run_backtest_v9() across files (scalp_v9_smflip_backtest.py, v10_feature_test.py, cross_instrument_sm_analysis.py, etc.), each with slight differences. New        │
+│ features added to one copy won't exist in others. Fix: create a single shared module.                                                                                                              │
+│                                                                                                                                                                                                    │
+│ ---                                                                                                                                                                                                │
+│ New Files to Create                                                                                                                                                                                │
+│                                                                                                                                                                                                    │
+│ All under backtesting_engine/strategies/:                                                                                                                                                          │
+│                                                                                                                                                                                                    │
+│ ┌──────────────────────────────┬──────────────────────────────────────────────────────────────────┐                                                                                                │
+│ │             File             │                             Purpose                              │                                                                                                │
+│ ├──────────────────────────────┼──────────────────────────────────────────────────────────────────┤                                                                                                │
+│ │ v10_test_common.py           │ Shared engine, data loaders, scoring, statistics                 │                                                                                                │
+│ ├──────────────────────────────┼──────────────────────────────────────────────────────────────────┤                                                                                                │
+│ │ v10_test_features.py         │ Individual feature validation (Tier 1 + Tier 2)                  │                                                                                                │
+│ ├──────────────────────────────┼──────────────────────────────────────────────────────────────────┤                                                                                                │
+│ │ v10_test_stress.py           │ Red-team: walk-forward, Monte Carlo, sensitivity, overfitting    │                                                                                                │
+│ ├──────────────────────────────┼──────────────────────────────────────────────────────────────────┤                                                                                                │
+│ │ v10_test_cross_instrument.py │ Run features on MES, ES, MYM                                     │                                                                                                │
+│ ├──────────────────────────────┼──────────────────────────────────────────────────────────────────┤                                                                                                │
+│ │ v10_test_report.py           │ Run all tests, output decision matrix                            │                                                                                                │
+│ ├──────────────────────────────┼──────────────────────────────────────────────────────────────────┤                                                                                                │
+│ │ fetch_databento_data.py      │ Download extended MNQ history from Databento (free $125 credits) │                                                                                                │
+│ └──────────────────────────────┴──────────────────────────────────────────────────────────────────┘                                                                                                │
+│                                                                                                                                                                                                    │
+│ ---                                                                                                                                                                                                │
+│ File 1: v10_test_common.py — Shared Infrastructure                                                                                                                                                 │
+│                                                                                                                                                                                                    │
+│ Unified Engine: run_backtest_v10()                                                                                                                                                                 │
+│                                                                                                                                                                                                    │
+│ Extends the canonical v9 engine from scalp_v9_smflip_backtest.py with feature toggles. All features OFF = identical to v9 baseline (must verify: 44 trades, PF ~2.325, WR ~63.6% on the 1-min      │
+│ data, or matching counts on 5-min prebaked).                                                                                                                                                       │
+│                                                                                                                                                                                                    │
+│ Feature toggle parameters added to function signature:                                                                                                                                             │
+│                                                                                                                                                                                                    │
+│ # TIER 1                                                                                                                                                                                           │
+│ underwater_exit_bars=0       # Exit if losing after N bars (0=disabled)                                                                                                                            │
+│ or_alignment=False           # Only trade in Opening Range breakout direction                                                                                                                      │
+│ or_range_minutes=30          # Duration of opening range window                                                                                                                                    │
+│                                                                                                                                                                                                    │
+│ # TIER 2                                                                                                                                                                                           │
+│ vwap_filter=False            # Only long above VWAP, short below                                                                                                                                   │
+│ prior_day_buffer=False       # Block trades far from prior day high/low                                                                                                                            │
+│ prior_day_buffer_pts=50      # Distance threshold in points                                                                                                                                        │
+│ price_structure_exit=False   # Exit on new low/high after N bars                                                                                                                                   │
+│ price_structure_bars=3       # Lookback for price structure                                                                                                                                        │
+│                                                                                                                                                                                                    │
+│ # Already tested (port from v10_feature_test.py)                                                                                                                                                   │
+│ sm_reversal_entry=False      # Enter opposite direction on SM flip exit                                                                                                                            │
+│ rsi_momentum_filter=False    # Only enter if RSI moving in trade direction                                                                                                                         │
+│                                                                                                                                                                                                    │
+│ Feature Implementation Notes                                                                                                                                                                       │
+│                                                                                                                                                                                                    │
+│ 1. 3-bar underwater exit: After entry, track bars held while unrealized P&L < 0 (using bar close vs entry price). If bars_in_trade >= N and still underwater, exit next bar open.                  │
+│ 2. Opening Range alignment: Pre-compute per-day OR high/low from first N minutes of RTH (10:00-10:30 default). Track OR breakout direction. Only allow longs after bullish breakout, shorts after  │
+│ bearish breakout.                                                                                                                                                                                  │
+│ 3. VWAP filter: Use the pre-computed VWAP column from the new b2119/cca38 data files (real TradingView VWAP with actual volume). Only long above VWAP, short below. Also test VWAP band distance   │
+│ (entry must be within N pts of VWAP, not extended).                                                                                                                                                │
+│ 4. Prior day levels: Compute previous session high/low/close. Block longs if price > prev_high + buffer, shorts if price < prev_low - buffer.                                                      │
+│ 5. Price structure exit: After N bars in trade, exit if price makes new low below N-bar low (long) or new high above N-bar high (short).                                                           │
+│                                                                                                                                                                                                    │
+│ Data Loaders                                                                                                                                                                                       │
+│                                                                                                                                                                                                    │
+│ Unified functions for all instruments:                                                                                                                                                             │
+│ - load_instrument_1min(instrument) — loads MNQ/MES/ES/MYM 1-min with SM + VWAP + Volume                                                                                                            │
+│   - MNQ primary: b2119 (has VWAP + Volume + SM, Jan 25 - Feb 13)                                                                                                                                   │
+│   - MES primary: cca38 (has VWAP + Volume + SM, Jan 25 - Feb 13)                                                                                                                                   │
+│   - ES: b6c2e (SM only, Jan 18 - Feb 13)                                                                                                                                                           │
+│   - MYM: b3131 (SM only, Jan 19 - Feb 13)                                                                                                                                                          │
+│ - load_mnq_5min_prebaked() — loads 55-day 5-min file for longer history tests                                                                                                                      │
+│ - resample_to_5min() — standard OHLC + SM + VWAP resampling (VWAP = last value per 5-min bar)                                                                                                      │
+│                                                                                                                                                                                                    │
+│ Statistical Utilities                                                                                                                                                                              │
+│                                                                                                                                                                                                    │
+│ - score_trades() — PF, WR, net P&L, max DD, avg bars, Sharpe                                                                                                                                       │
+│ - bootstrap_ci(trades, metric, n=10000, ci=0.95) — confidence intervals                                                                                                                            │
+│ - monte_carlo_equity(trades, n=10000) — shuffle trade order, get DD distribution                                                                                                                   │
+│ - permutation_test(baseline_trades, feature_trades) — p-value for PF difference                                                                                                                    │
+│ - random_feature_baseline(trades, n=100) — generate random filters, get null PF distribution                                                                                                       │
+│                                                                                                                                                                                                    │
+│ Instrument Config                                                                                                                                                                                  │
+│                                                                                                                                                                                                    │
+│ INSTRUMENTS = {                                                                                                                                                                                    │
+│     'MNQ': {'commission': 0.52, 'dollar_per_pt': 2.0, 'file': 'b2119', 'has_vwap': True},                                                                                                          │
+│     'MES': {'commission': 0.52, 'dollar_per_pt': 5.0, 'file': 'cca38', 'has_vwap': True},                                                                                                          │
+│     'ES':  {'commission': 1.25, 'dollar_per_pt': 50.0, 'file': 'b6c2e', 'has_vwap': False},                                                                                                        │
+│     'MYM': {'commission': 0.52, 'dollar_per_pt': 0.50, 'file': 'b3131', 'has_vwap': False},                                                                                                        │
+│ }                                                                                                                                                                                                  │
+│                                                                                                                                                                                                    │
+│ ---                                                                                                                                                                                                │
+│ File 2: v10_test_features.py — Feature Validation                                                                                                                                                  │
+│                                                                                                                                                                                                    │
+│ Primary dataset: MNQ 1-min with VWAP+Volume (b2119), resampled to 5-min (Jan 25 - Feb 13, ~15 trading days)                                                                                        │
+│ Extended dataset: MNQ 5-min prebaked (5_46a9d.csv, Nov 25 - Feb 12, ~55 trading days) — for features that don't need VWAP                                                                          │
+│ Cross-validation: MES 1-min with VWAP+Volume (cca38), same date range                                                                                                                              │
+│                                                                                                                                                                                                    │
+│ For each feature:                                                                                                                                                                                  │
+│                                                                                                                                                                                                    │
+│ 1. Run v9 baseline, record metrics                                                                                                                                                                 │
+│ 2. Run v9 + feature ON, record metrics                                                                                                                                                             │
+│ 3. Compute delta + bootstrap 95% CI on PF improvement                                                                                                                                              │
+│ 4. Run permutation test for statistical significance                                                                                                                                               │
+│ 5. Analyze which specific trades were changed (added/removed/modified)                                                                                                                             │
+│                                                                                                                                                                                                    │
+│ Tests in order:                                                                                                                                                                                    │
+│                                                                                                                                                                                                    │
+│ ┌─────┬─────────────────────────┬──────────────────────────────────────────────┐                                                                                                                   │
+│ │  #  │         Feature         │               Variants Tested                │                                                                                                                   │
+│ ├─────┼─────────────────────────┼──────────────────────────────────────────────┤                                                                                                                   │
+│ │ T1  │ 3-bar underwater exit   │ bars = [2, 3, 4, 5, 6]                       │                                                                                                                   │
+│ ├─────┼─────────────────────────┼──────────────────────────────────────────────┤                                                                                                                   │
+│ │ T2  │ Opening Range alignment │ or_minutes = [15, 30, 45, 60]                │                                                                                                                   │
+│ ├─────┼─────────────────────────┼──────────────────────────────────────────────┤                                                                                                                   │
+│ │ T3  │ VWAP filter             │ binary + VWAP band distance [10, 25, 50] pts │                                                                                                                   │
+│ ├─────┼─────────────────────────┼──────────────────────────────────────────────┤                                                                                                                   │
+│ │ T4  │ Prior day levels        │ buffer = [25, 50, 75, 100] pts               │                                                                                                                   │
+│ ├─────┼─────────────────────────┼──────────────────────────────────────────────┤                                                                                                                   │
+│ │ T5  │ Price structure exit    │ bars = [2, 3, 4, 5]                          │                                                                                                                   │
+│ ├─────┼─────────────────────────┼──────────────────────────────────────────────┤                                                                                                                   │
+│ │ T6  │ SM flip reversal entry  │ (binary, revalidate)                         │                                                                                                                   │
+│ ├─────┼─────────────────────────┼──────────────────────────────────────────────┤                                                                                                                   │
+│ │ T7  │ RSI momentum direction  │ (binary, revalidate)                         │                                                                                                                   │
+│ └─────┴─────────────────────────┴──────────────────────────────────────────────┘                                                                                                                   │
+│                                                                                                                                                                                                    │
+│ Per-feature deep analysis:                                                                                                                                                                         │
+│                                                                                                                                                                                                    │
+│ T1 extra: Histogram of bars-held-while-underwater for winners vs losers. Verify the research claim that losers avg 9.9 bars vs winners 5.0 bars.                                                   │
+│                                                                                                                                                                                                    │
+│ T2 extra: Split all v9 trades into OR-aligned vs counter-OR. Compare WR/PF per group. If counter-OR trades aren't actually worse, the filter has no value.                                         │
+│                                                                                                                                                                                                    │
+│ T3 extra: For each trade, log distance from VWAP at entry. Plot P&L vs VWAP distance to see if there's a relationship.                                                                             │
+│                                                                                                                                                                                                    │
+│ T4 extra: For each trade, compute distance from prior day high/low. Plot P&L vs extension to find the optimal buffer threshold.                                                                    │
+│                                                                                                                                                                                                    │
+│ Output format per feature:                                                                                                                                                                         │
+│                                                                                                                                                                                                    │
+│ FEATURE: 3-Bar Underwater Exit (bars=3)                                                                                                                                                            │
+│   Metric           Baseline    Feature     Delta      95% CI          Sig?                                                                                                                         │
+│   Trades           44          42          -2         [-4, 0]         No                                                                                                                           │
+│   Win Rate %       63.6        66.7        +3.1       [-2.1, +8.3]   No                                                                                                                            │
+│   Profit Factor    2.325       2.891       +0.566     [+0.12, +1.02] YES                                                                                                                           │
+│   Net P&L ($)      1583        1913        +330       [+85, +575]    YES                                                                                                                           │
+│   Max DD ($)       -452        -350        +102       [+30, +175]    YES                                                                                                                           │
+│                                                                                                                                                                                                    │
+│ ---                                                                                                                                                                                                │
+│ File 3: v10_test_stress.py — Red-Team / Stress Tests                                                                                                                                               │
+│                                                                                                                                                                                                    │
+│ S1: Walk-Forward Validation                                                                                                                                                                        │
+│                                                                                                                                                                                                    │
+│ - In-sample: Jan 18 - Feb 5 (~14 trading days)                                                                                                                                                     │
+│ - Out-of-sample: Feb 6 - Feb 13 (~6 trading days)                                                                                                                                                  │
+│ - Run baseline + each winning feature on both splits                                                                                                                                               │
+│ - PASS: OOS PF >= 1.0 AND OOS PF >= 0.7 * IS PF (< 30% degradation)                                                                                                                                │
+│                                                                                                                                                                                                    │
+│ S2: Leave-One-Day-Out Cross-Validation                                                                                                                                                             │
+│                                                                                                                                                                                                    │
+│ - For each of ~20 trading days, hold out that day, run on remaining 19                                                                                                                             │
+│ - Record held-out day P&L for baseline and each feature                                                                                                                                            │
+│ - Compute: avg daily P&L, std dev, % of days profitable                                                                                                                                            │
+│ - PASS: Feature improves avg daily P&L without increasing std dev                                                                                                                                  │
+│                                                                                                                                                                                                    │
+│ S3: Monte Carlo Trade Sequence (10,000 shuffles)                                                                                                                                                   │
+│                                                                                                                                                                                                    │
+│ - Shuffle baseline trade P&Ls, build equity curves                                                                                                                                                 │
+│ - Report P5/P25/P50/P75/P95 of max drawdown and final equity                                                                                                                                       │
+│ - Repeat for each feature's trade set                                                                                                                                                              │
+│ - Good feature: shifts DD distribution left (less severe worst cases)                                                                                                                              │
+│                                                                                                                                                                                                    │
+│ S4: Parameter Sensitivity                                                                                                                                                                          │
+│                                                                                                                                                                                                    │
+│ - For each feature param, test a grid of values (see variants in File 2)                                                                                                                           │
+│ - Also sweep baseline params with features on: RSI [8,10,12,14], levels [(55/45),(60/40),(65/35)], SM threshold [0.0,0.05,0.10], cooldown [2,3,4,6]                                                │
+│ - Stability score: % of param variants where PF > 1.0 and std dev of PF across variants                                                                                                            │
+│   - Stable: >70% profitable, PF std < 0.5                                                                                                                                                          │
+│   - Fragile: <50% profitable or PF std > 1.0                                                                                                                                                       │
+│                                                                                                                                                                                                    │
+│ S5: Overfitting Detection                                                                                                                                                                          │
+│                                                                                                                                                                                                    │
+│ Lucky trade test: Remove top 1, 2, 3 P&L trades individually. If PF drops below 1.3 on any removal, edge is fragile.                                                                               │
+│                                                                                                                                                                                                    │
+│ Random feature baseline: Generate 100 random binary filters (random coin flip per bar to allow/block trade). Run each on v9. Build null distribution of PF. Real feature must beat P95 of random   │
+│ distribution.                                                                                                                                                                                      │
+│                                                                                                                                                                                                    │
+│ Temporal stability: Split into 4 non-overlapping ~5-day windows. Feature must be profitable in >= 3 of 4 windows.                                                                                  │
+│                                                                                                                                                                                                    │
+│ S6: Regime Analysis                                                                                                                                                                                │
+│                                                                                                                                                                                                    │
+│ Classify each day by:                                                                                                                                                                              │
+│ - Range: wide (> 1.25x median), narrow (< 0.75x median), normal                                                                                                                                    │
+│ - Trend: up, down, choppy                                                                                                                                                                          │
+│                                                                                                                                                                                                    │
+│ Run baseline + features on each regime subset. Flag features that only work in one regime.                                                                                                         │
+│                                                                                                                                                                                                    │
+│ ---                                                                                                                                                                                                │
+│ File 4: v10_test_cross_instrument.py — Cross-Instrument Validation                                                                                                                                 │
+│                                                                                                                                                                                                    │
+│ Run v9 baseline + each winning feature on MES, ES, MYM.                                                                                                                                            │
+│                                                                                                                                                                                                    │
+│ Scaling rules: Price-based features (OR, VWAP, prior day levels) auto-scale. Point-based params (buffer_pts, max_loss_pts) must scale by instrument: use buffer_fraction * avg_daily_range instead │
+│  of fixed points.                                                                                                                                                                                  │
+│                                                                                                                                                                                                    │
+│ Decision: Feature must be profitable on MNQ + at least 2 of 3 other instruments.                                                                                                                   │
+│                                                                                                                                                                                                    │
+│ Commission/sizing:                                                                                                                                                                                 │
+│ - MES: $0.52/side, $5/pt                                                                                                                                                                           │
+│ - ES: $1.25/side, $50/pt                                                                                                                                                                           │
+│ - MYM: $0.52/side, $0.50/pt                                                                                                                                                                        │
+│                                                                                                                                                                                                    │
+│ ---                                                                                                                                                                                                │
+│ File 5: v10_test_report.py — Final Decision Matrix                                                                                                                                                 │
+│                                                                                                                                                                                                    │
+│ Runs all test scripts (or reads cached results) and outputs:                                                                                                                                       │
+│                                                                                                                                                                                                    │
+│ FEATURE              | PF Delta | Walk-Fwd | Cross-Inst | Sensitivity | Overfit | VERDICT                                                                                                          │
+│ 3-bar underwater     | +0.57    | PASS     | 3/3        | Stable      | Clean   | ADOPT                                                                                                            │
+│ OR alignment         | +0.31    | PASS     | 2/3        | Stable      | Clean   | ADOPT                                                                                                            │
+│ VWAP filter          | +0.15    | FAIL     | 1/3        | Fragile     | Flag    | REJECT                                                                                                           │
+│ ...                                                                                                                                                                                                │
+│                                                                                                                                                                                                    │
+│ Adoption criteria (must pass ALL):                                                                                                                                                                 │
+│ 1. PF improvement with 95% CI excluding baseline                                                                                                                                                   │
+│ 2. Walk-forward OOS PF >= 1.0, degradation < 30%                                                                                                                                                   │
+│ 3. Profitable on MNQ + 2 of 3 other instruments                                                                                                                                                    │
+│ 4. Stable parameter sensitivity (>70% variants profitable)                                                                                                                                         │
+│ 5. Passes random feature baseline (PF > P95 of random)                                                                                                                                             │
+│ 6. Survives lucky trade removal (PF stays > 1.3)                                                                                                                                                   │
+│ 7. Trade count stays >= 20                                                                                                                                                                         │
+│                                                                                                                                                                                                    │
+│ ---                                                                                                                                                                                                │
+│ Data Strategy                                                                                                                                                                                      │
+│                                                                                                                                                                                                    │
+│ Available now (primary — has VWAP + Volume + SM):                                                                                                                                                  │
+│ - CME_MINI_MNQ1!, 1_b2119.csv — MNQ 1-min, Jan 25 - Feb 13, 20,695 bars                                                                                                                            │
+│ - CME_MINI_MES1!, 1_cca38.csv — MES 1-min, Jan 25 - Feb 13, 20,699 bars                                                                                                                            │
+│                                                                                                                                                                                                    │
+│ Available now (extended history, SM only, no VWAP/Volume):                                                                                                                                         │
+│ - MNQ 5-min prebaked: 55 trading days (Nov 25 - Feb 12) — longer backtest window                                                                                                                   │
+│ - MNQ 1-min 0efb1: Jan 18 - Feb 13 (SM only) — slightly longer window                                                                                                                              │
+│ - ES 1-min b6c2e: Jan 18 - Feb 13 (SM only) — cross-instrument                                                                                                                                     │
+│ - MYM 1-min b3131: Jan 19 - Feb 13 (SM only) — cross-instrument                                                                                                                                    │
+│                                                                                                                                                                                                    │
+│ Databento download script (included in deliverable):                                                                                                                                               │
+│ - Script to download 3-6 months MNQ 1-min OHLCV with real volume via $125 free credits                                                                                                             │
+│ - No AlgoAlpha SM, but price-based features (OR, VWAP, prior day levels, underwater exit, price structure) can all be tested                                                                       │
+│ - Dramatically improves statistical power for out-of-sample validation                                                                                                                             │
+│                                                                                                                                                                                                    │
+│ ---                                                                                                                                                                                                │
+│ File 6: fetch_databento_data.py — Extended Data Download                                                                                                                                           │
+│                                                                                                                                                                                                    │
+│ Script to download 3-6 months of MNQ 1-min OHLCV from Databento using free $125 credits.                                                                                                           │
+│                                                                                                                                                                                                    │
+│ - Uses databento Python package (pip install databento)                                                                                                                                            │
+│ - Downloads CME GLBX.MDP3 feed, MNQ continuous front-month                                                                                                                                         │
+│ - Saves as CSV matching existing column format (adds OHLCV, no SM columns)                                                                                                                         │
+│ - Date range: configurable, default 6 months back from today                                                                                                                                       │
+│ - Outputs to backtesting_engine/data/ with descriptive filename                                                                                                                                    │
+│ - Includes instructions for signing up and getting API key                                                                                                                                         │
+│                                                                                                                                                                                                    │
+│ Usage after download: Price-based features (OR alignment, VWAP, prior day levels, underwater exit, price structure exit) can all be tested on extended data. SM-dependent features (SM reversal,   │
+│ RSI momentum + SM) limited to AlgoAlpha data window.                                                                                                                                               │
+│                                                                                                                                                                                                    │
+│ ---                                                                                                                                                                                                │
+│ Execution Order                                                                                                                                                                                    │
+│                                                                                                                                                                                                    │
+│ 1. Build v10_test_common.py — engine + loaders + stats                                                                                                                                             │
+│ 2. Validate baseline — confirm unified engine matches known v9 results                                                                                                                             │
+│ 3. Build + run v10_test_features.py — all 7 features individually                                                                                                                                  │
+│ 4. Build + run v10_test_stress.py — red-team all features                                                                                                                                          │
+│ 5. Build + run v10_test_cross_instrument.py — validate on MES/ES/MYM                                                                                                                               │
+│ 6. Build + run v10_test_report.py — generate final decision matrix                                                                                                                                 │
+│ 7. Build fetch_databento_data.py — ready to run when you sign up                                                                                                                                   │
+│                                                                                                                                                                                                    │
+│ All built and run in one shot. Results printed to stdout.                                                                                                                                          │
+│                                                                                                                                                                                                    │
+│ Verification                                                                                                                                                                                       │
+│                                                                                                                                                                                                    │
+│ - Step 2 is the critical gate: unified engine with all features OFF must match v9 baseline exactly (same trade count, same P&L within $1 rounding)                                                 │
+│ - Each feature test prints full trade list for manual spot-checking                                                                                                                                │
+│ - Cross-instrument tests can be compared against existing cross_instrument_sm_analysis.py results                                                                                                  │
+│ - All scripts are standalone (run with python strategies/v10_test_X.py)                                                                                                                            │
+│                                                                                                                                                                                                    │
+│ Key Source Files to Reuse                                                                                                                                                                          │
+│                                                                                                                                                                                                    │
+│ - scalp_v9_smflip_backtest.py — canonical v9 engine (run_backtest_v9(), compute_rsi(), compute_smart_money(), score_trades(), data loaders)                                                        │
+│ - v10_feature_test.py — SM reversal + RSI momentum logic to port                                                                                                                                   │
+│ - scalp_v9_signal_quality_test.py — parameter sweep pattern to follow                                                                                                                              │
+│ - cross_instrument_sm_analysis.py — cross-instrument loading pattern                                                                                                                               │
+╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯

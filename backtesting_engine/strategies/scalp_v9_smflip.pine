@@ -1,0 +1,224 @@
+// This Pine Script(TM) is subject to the Terms of Use at https://www.tradingview.com/pine-script-docs/
+// @description SM+RSI v9 - SM-Flip Entry/Exit Strategy
+// Runs on 1-MIN MNQ chart. Reads AlgoAlpha SM via input.source() on 1-min.
+// Uses 5-min RSI via request.security() for entry confirmation.
+// Exit: SM flips sign (crosses zero) - lets winners run.
+//
+// SETUP:
+//   1. Open MNQ on a 1-MINUTE chart
+//   2. Add AlgoAlpha "Smart Money Volume Index" indicator (Display Mode: "Net")
+//   3. Add this strategy
+//   4. In strategy Settings -> Inputs -> Smart Money group:
+//      - "AlgoAlpha Net Buy Line" -> select AlgoAlpha's "Net Buy Line" plot
+//      - "AlgoAlpha Net Sell Line" -> select AlgoAlpha's "Net Sell Line" plot
+//   5. Scroll chart left to load 500+ bars of history
+//
+// KEY: Runs on 1-min chart to read AlgoAlpha directly (proven working pattern).
+//   RSI is computed on 5-min via request.security() for the multi-TF edge.
+//
+// Best Python configs (v9 fixed, no look-ahead, AA_prebaked):
+//   RSI10 55/45 SM>0.00 CD3 cross -> 44 trades, 63.6% WR, PF 2.325, +$1583/1lot
+//   RSI12 55/45 SM>0.05 CD3 cross -> 36 trades, 63.9% WR, PF 2.514, +$1458/1lot
+//   RSI10 65/35 SM>0.05 CD6 cross -> 24 trades, 54.2% WR, PF 3.503, +$1142/1lot
+//@version=6
+strategy("SM+RSI v9 SM-Flip", overlay=true,
+     initial_capital=1000,
+     default_qty_type=strategy.fixed,
+     default_qty_value=1,
+     commission_type=strategy.commission.cash_per_contract,
+     commission_value=0.52,
+     slippage=0,
+     margin_long=0,
+     margin_short=0,
+     process_orders_on_close=false,
+     calc_on_every_tick=false,
+     fill_orders_on_standard_ohlc=true,
+     max_bars_back=5000)
+
+// --- Input Groups ---
+grp_sm   = "SMART MONEY (from AlgoAlpha on 1-min chart)"
+grp_rsi  = "RSI SETTINGS (5-min)"
+grp_exit = "EXIT SETTINGS"
+grp_sess = "SESSION FILTER"
+grp_disp = "DISPLAY"
+
+// --- SM Inputs ---
+sm_buy_src   = input.source(close, "AlgoAlpha Net Buy Line",  group=grp_sm,
+     tooltip="Link to AlgoAlpha Smart Money -> Net Buy Line plot")
+sm_sell_src  = input.source(close, "AlgoAlpha Net Sell Line", group=grp_sm,
+     tooltip="Link to AlgoAlpha Smart Money -> Net Sell Line plot")
+sm_threshold = input.float(0.00, "SM Net Index Threshold", minval=0, step=0.05, group=grp_sm,
+     tooltip="Min |SM| to confirm direction. 0 = any non-zero SM. 0.05-0.10 = moderate filter.")
+
+// --- RSI Inputs (computed on 5-min) ---
+rsi_len     = input.int(10,  "RSI Length",     minval=2,  maxval=50, group=grp_rsi)
+rsi_buy     = input.int(55,  "RSI Buy Level",  minval=50, maxval=90, group=grp_rsi)
+rsi_sell    = input.int(45,  "RSI Sell Level", minval=10, maxval=50, group=grp_rsi)
+
+// --- Exit Inputs ---
+max_loss_pts = input.int(0,  "Max Loss Stop (points, 0=disabled)", minval=0, step=5, group=grp_exit,
+     tooltip="Hard stop loss in points. 0 = no stop, rely purely on SM flip exit.")
+cooldown     = input.int(15, "Cooldown Bars After Exit (1-min bars)", minval=0, maxval=150, group=grp_exit,
+     tooltip="Bars to wait after exit. 15 bars on 1-min = 15 min = 3 bars on 5-min.")
+
+// --- Session Inputs ---
+use_session = input.bool(true, "NY Session Only", group=grp_sess)
+sess_start  = input.session("1000-1545", "Entry Window (ET)",     group=grp_sess)
+sess_close  = input.session("0930-1600", "Session Close Window (ET)", group=grp_sess)
+
+// --- Display Inputs ---
+show_signals = input.bool(true, "Show Entry Signals",  group=grp_disp)
+show_sm_bg   = input.bool(true, "Show SM Background",  group=grp_disp)
+show_sm_net  = input.bool(true, "Show SM Net Index",   group=grp_disp)
+
+// ============================================================================
+// SMART MONEY - read from AlgoAlpha via input.source() on 1-min chart
+// ============================================================================
+sm_net_index = nz(sm_buy_src) + nz(sm_sell_src)
+
+// Detect if sources are linked
+is_linked = sm_buy_src != close or sm_sell_src != close
+
+// SM direction
+sm_bull = sm_net_index > sm_threshold
+sm_bear = sm_net_index < -sm_threshold
+
+// SM flip (cross zero)
+sm_flipped_bull = sm_net_index > 0 and sm_net_index[1] <= 0
+sm_flipped_bear = sm_net_index < 0 and sm_net_index[1] >= 0
+
+// ============================================================================
+// RSI - computed on 5-min via request.security()
+// ============================================================================
+rsi_5m = request.security(syminfo.tickerid, "5", ta.rsi(close, rsi_len), lookahead=barmerge.lookahead_off)
+rsi_5m_prev = request.security(syminfo.tickerid, "5", ta.rsi(close, rsi_len)[1], lookahead=barmerge.lookahead_off)
+
+rsi_cross_up   = rsi_5m > rsi_buy and rsi_5m_prev <= rsi_buy
+rsi_cross_down = rsi_5m < rsi_sell and rsi_5m_prev >= rsi_sell
+
+// ============================================================================
+// ENTRY/EXIT LOGIC
+// ============================================================================
+
+// Episode logic - only one entry per SM episode
+var bool long_used  = false
+var bool short_used = false
+
+if not sm_bull or sm_flipped_bear
+    long_used := false
+if not sm_bear or sm_flipped_bull
+    short_used := false
+
+// Session filter
+in_entry_window = not use_session or not na(time(timeframe.period, sess_start, "America/New_York"))
+in_session      = not use_session or not na(time(timeframe.period, sess_close, "America/New_York"))
+
+// Cooldown (in 1-min bars)
+var int bars_since_exit = 9999
+bars_since_exit += 1
+cooldown_ok = bars_since_exit >= cooldown
+
+// Entry signals: SM direction (1-min) + RSI cross (5-min)
+long_entry  = sm_bull and rsi_cross_up   and not long_used  and in_entry_window and cooldown_ok
+short_entry = sm_bear and rsi_cross_down and not short_used and in_entry_window and cooldown_ok
+
+// Exit signals
+long_exit_sm  = sm_flipped_bear
+short_exit_sm = sm_flipped_bull
+eod_close = strategy.position_size != 0 and not in_session
+
+// SM Flip exit for longs
+if strategy.position_size > 0 and long_exit_sm
+    strategy.close("Long", comment="SM Flip")
+    bars_since_exit := 0
+
+// SM Flip exit for shorts
+if strategy.position_size < 0 and short_exit_sm
+    strategy.close("Short", comment="SM Flip")
+    bars_since_exit := 0
+
+// Max loss stop (points to ticks: MNQ mintick=0.25, so 1 point = 4 ticks)
+max_loss_ticks = math.round(max_loss_pts / syminfo.mintick)
+if max_loss_pts > 0 and strategy.position_size > 0
+    strategy.exit("Long SL", "Long", loss=max_loss_ticks)
+
+if max_loss_pts > 0 and strategy.position_size < 0
+    strategy.exit("Short SL", "Short", loss=max_loss_ticks)
+
+// EOD close
+if eod_close
+    strategy.close_all(comment="EOD")
+    bars_since_exit := 0
+
+// Entries
+if long_entry and strategy.position_size == 0
+    strategy.entry("Long", strategy.long)
+    long_used := true
+    bars_since_exit := 9999
+
+if short_entry and strategy.position_size == 0
+    strategy.entry("Short", strategy.short)
+    short_used := true
+    bars_since_exit := 9999
+
+// ============================================================================
+// PLOTS
+// ============================================================================
+
+// SM background color
+var color sm_bg_col = na
+if sm_net_index > sm_threshold
+    sm_bg_col := color.new(color.green, 85)
+else if sm_net_index < -sm_threshold
+    sm_bg_col := color.new(color.red, 85)
+else
+    sm_bg_col := color.new(color.gray, 95)
+bgcolor(show_sm_bg ? sm_bg_col : na)
+
+// Entry signals
+plotshape(show_signals and long_entry, title="Long", style=shape.triangleup, location=location.belowbar, color=color.green, size=size.small, text="L")
+plotshape(show_signals and short_entry, title="Short", style=shape.triangledown, location=location.abovebar, color=color.red, size=size.small, text="S")
+
+// SM flip markers
+plotshape(show_signals and sm_flipped_bull and strategy.position_size < 0, title="SM Bull", style=shape.xcross, location=location.abovebar, color=color.lime, size=size.tiny)
+plotshape(show_signals and sm_flipped_bear and strategy.position_size > 0, title="SM Bear", style=shape.xcross, location=location.belowbar, color=color.orange, size=size.tiny)
+
+// SM Net Index plot (lower pane)
+sm_plot_col = sm_net_index > 0 ? color.green : color.red
+plot(show_sm_net ? sm_net_index : na, "SM Net Index", color=sm_plot_col, linewidth=2, display=display.pane)
+hline(0, "Zero", color=color.gray, linestyle=hline.style_dotted)
+
+// Warning if not linked
+var table warn_tbl = table.new(position.bottom_center, 1, 1)
+if barstate.islast
+    if not is_linked
+        table.cell(warn_tbl, 0, 0, "  LINK SM SOURCES TO ALGOALPHA IN SETTINGS  ", text_color=color.white, bgcolor=color.red, text_size=size.normal)
+    else
+        table.cell(warn_tbl, 0, 0, "", bgcolor=color.new(color.black, 100))
+
+// Info table
+var table info = table.new(position.top_right, 2, 7, bgcolor=color.new(color.black, 80))
+if barstate.islastconfirmedhistory
+    table.cell(info, 0, 0, "v9 SM-Flip", text_color=color.white, text_size=size.small)
+    table.cell(info, 1, 0, is_linked ? "AA Linked" : "NOT LINKED", text_color=is_linked ? color.green : color.red, text_size=size.small)
+    table.cell(info, 0, 1, "SM Thr", text_color=color.gray, text_size=size.small)
+    table.cell(info, 1, 1, str.tostring(sm_threshold, "#.##"), text_color=color.white, text_size=size.small)
+    table.cell(info, 0, 2, "Cooldown", text_color=color.gray, text_size=size.small)
+    table.cell(info, 1, 2, str.tostring(cooldown) + " bars", text_color=color.white, text_size=size.small)
+    table.cell(info, 0, 3, "Max Loss", text_color=color.gray, text_size=size.small)
+    ml_text = max_loss_pts > 0 ? str.tostring(max_loss_pts) + " pts" : "OFF"
+    ml_col = max_loss_pts > 0 ? color.yellow : color.gray
+    table.cell(info, 1, 3, ml_text, text_color=ml_col, text_size=size.small)
+    table.cell(info, 0, 4, "SM Now", text_color=color.gray, text_size=size.small)
+    sm_col = sm_net_index > 0 ? color.green : color.red
+    table.cell(info, 1, 4, str.tostring(sm_net_index, "#.###"), text_color=sm_col, text_size=size.small)
+    table.cell(info, 0, 5, "5m RSI", text_color=color.gray, text_size=size.small)
+    rsi_col = color.white
+    if rsi_5m > rsi_buy
+        rsi_col := color.green
+    else if rsi_5m < rsi_sell
+        rsi_col := color.red
+    table.cell(info, 1, 5, str.tostring(rsi_5m, "#.#"), text_color=rsi_col, text_size=size.small)
+    rsi_label = "RSI" + str.tostring(rsi_len) + " " + str.tostring(rsi_buy) + "/" + str.tostring(rsi_sell)
+    table.cell(info, 0, 6, "RSI Cfg", text_color=color.gray, text_size=size.small)
+    table.cell(info, 1, 6, rsi_label, text_color=color.yellow, text_size=size.small)

@@ -1,0 +1,211 @@
+// ═══════════════════════════════════════════════════════════════════════════
+// 15-Point Scalper v8 — 5-min Fallback (INPUT SOURCE from AlgoAlpha)
+// ═══════════════════════════════════════════════════════════════════════════
+// Simpler version: runs on 5-min chart, reads AlgoAlpha SM via input.source.
+// No request.security() needed — everything is on the same timeframe.
+// Gets more backtest history (~80 days vs ~17 days on 1-min).
+//
+// SETUP:
+//   1. Open MNQ on a 5-MINUTE chart
+//   2. Add "Smart Money Volume Index [AlgoAlpha]" indicator
+//      Settings: Index Period=20, Volume Flow Period=12, Norm Period=400
+//      Display Mode: "Net"
+//   3. Add this strategy
+//   4. In strategy Settings → Inputs → "Smart Money" group:
+//      - "AlgoAlpha Net Buy Line"  → select AlgoAlpha's "Net Buy Line" plot
+//      - "AlgoAlpha Net Sell Line" → select AlgoAlpha's "Net Sell Line" plot
+//   5. Scroll chart left to load history
+//
+// Signal: SM direction (from AlgoAlpha on 5m) + 5-min RSI zone
+//   LONG  — SM > threshold (green) + RSI > buy level
+//   SHORT — SM < -threshold (red)  + RSI < sell level
+//
+// Apply to 5-MINUTE MNQ chart.
+// ═══════════════════════════════════════════════════════════════════════════
+
+//@version=6
+strategy("SM+RSI v8 Fallback (5m)", overlay=true, initial_capital=1000,
+     default_qty_type=strategy.fixed, default_qty_value=1,
+     commission_type=strategy.commission.cash_per_contract, commission_value=0.52,
+     slippage=0, margin_long=0, margin_short=0,
+     calc_on_every_tick=false, fill_orders_on_standard_ohlc=true,
+     process_orders_on_close=false)
+
+// ─── Inputs ──────────────────────────────────────────────────────────────────
+
+// SM from AlgoAlpha via input.source()
+grp_sm  = "Smart Money (from AlgoAlpha indicator)"
+sm_buy_src   = input.source(close, "AlgoAlpha Net Buy Line",  group=grp_sm,
+               tooltip="Select AlgoAlpha's 'Net Buy Line' plot from the dropdown.")
+sm_sell_src  = input.source(close, "AlgoAlpha Net Sell Line", group=grp_sm,
+               tooltip="Select AlgoAlpha's 'Net Sell Line' plot from the dropdown.")
+sm_threshold = input.float(0.10, "SM Net Index Threshold", minval=0, step=0.01, group=grp_sm)
+
+// RSI (native 5-min — no request.security needed)
+grp_rsi = "RSI Settings"
+rsi_len    = input.int(11,    "RSI Length",     minval=1,  group=grp_rsi)
+rsi_buy    = input.float(65,  "RSI Buy Level",             group=grp_rsi)
+rsi_sell   = input.float(35,  "RSI Sell Level",            group=grp_rsi)
+
+// Exits
+grp_exit = "Exit Settings"
+tp_pts     = input.float(15, "Take Profit (points)", group=grp_exit)
+sl_pts     = input.float(7,  "Stop Loss (points)",   group=grp_exit)
+cooldown   = input.int(6,    "Cooldown Bars After Exit", minval=1, maxval=100, group=grp_exit,
+             tooltip="In 5-min bars. 6 bars = 30 min cooldown.")
+
+// Session
+grp_sess = "Session Filter"
+use_session = input.bool(true, "NY Session Only", group=grp_sess)
+sess_entry  = input.session("1000-1545", "Entry Window (ET)", group=grp_sess)
+sess_close  = input.session("0930-1600", "Session Close Window (ET)", group=grp_sess)
+
+// Display
+grp_disp = "Display"
+show_signals  = input.bool(true,  "Show Entry Signals",   group=grp_disp)
+show_bg       = input.bool(true,  "Show SM Background",   group=grp_disp)
+show_sm_plot  = input.bool(true,  "Show SM Net Index",    group=grp_disp)
+
+// ═════════════════════════════════════════════════════════════════════════════
+// SMART MONEY — read directly from AlgoAlpha
+// ═════════════════════════════════════════════════════════════════════════════
+
+sm_net_index = nz(sm_buy_src) + nz(sm_sell_src)
+
+sm_bullish = sm_net_index > sm_threshold
+sm_bearish = sm_net_index < -sm_threshold
+
+// ─── RSI (native 5-min) ─────────────────────────────────────────────────────
+rsi_val = ta.rsi(close, rsi_len)
+
+rsi_in_buy_zone  = rsi_val > rsi_buy
+rsi_in_sell_zone = rsi_val < rsi_sell
+
+// ─── Session Filter ────────────────────────────────────────────────────────
+in_entry_window = use_session ? not na(time(timeframe.period, sess_entry, "America/New_York")) : true
+in_full_session = use_session ? not na(time(timeframe.period, sess_close, "America/New_York")) : true
+
+// ─── Trade State Machine ───────────────────────────────────────────────────
+var int  trade_state       = 0
+var int  exit_bar          = -9999
+var bool long_signal_used  = false
+var bool short_signal_used = false
+
+// Episode reset
+if not rsi_in_buy_zone or not sm_bullish
+    long_signal_used := false
+if not rsi_in_sell_zone or not sm_bearish
+    short_signal_used := false
+
+// Detect exits
+pos_went_flat = strategy.position_size == 0 and trade_state != 0
+if pos_went_flat
+    trade_state := 0
+    exit_bar    := bar_index
+
+// Cooldown
+bars_since_exit = bar_index - exit_bar
+cooldown_ok = bars_since_exit >= cooldown
+
+// ─── Entry Conditions ──────────────────────────────────────────────────────
+can_enter = trade_state == 0 and cooldown_ok and in_entry_window
+
+long_signal  = can_enter and rsi_in_buy_zone  and sm_bullish and not long_signal_used
+short_signal = can_enter and rsi_in_sell_zone and sm_bearish and not short_signal_used
+
+// ─── Strategy Execution ────────────────────────────────────────────────────
+if long_signal
+    strategy.entry("Long", strategy.long)
+    trade_state      := 1
+    long_signal_used := true
+
+if short_signal
+    strategy.entry("Short", strategy.short)
+    trade_state       := -1
+    short_signal_used := true
+
+// TP/SL
+if strategy.position_size > 0
+    strategy.exit("Long TP/SL", "Long",
+         profit = tp_pts / syminfo.mintick,
+         loss   = sl_pts / syminfo.mintick)
+
+if strategy.position_size < 0
+    strategy.exit("Short TP/SL", "Short",
+         profit = tp_pts / syminfo.mintick,
+         loss   = sl_pts / syminfo.mintick)
+
+// EOD Close
+if use_session and not in_full_session and strategy.position_size != 0
+    strategy.close_all("EOD Close")
+    trade_state := 0
+    exit_bar    := bar_index
+
+// ─── Visuals ───────────────────────────────────────────────────────────────
+plotshape(show_signals and long_signal ? low : na, title="Long",
+     style=shape.triangleup, location=location.belowbar,
+     color=color.new(#00e676, 0), size=size.small, text="L")
+
+plotshape(show_signals and short_signal ? high : na, title="Short",
+     style=shape.triangledown, location=location.abovebar,
+     color=color.new(#ff1744, 0), size=size.small, text="S")
+
+sm_bg = show_bg ? (sm_bullish ? color.new(#00e676, 93) : sm_bearish ? color.new(#ff1744, 93) : na) : na
+bgcolor(sm_bg, title="SM Direction")
+
+sess_bg = use_session and not in_entry_window ? color.new(color.gray, 95) : na
+bgcolor(sess_bg, title="Outside Entry Window")
+
+bar_col = rsi_in_buy_zone ? color.new(#2196f3, 30) : rsi_in_sell_zone ? color.new(#e040fb, 30) : na
+barcolor(bar_col, title="RSI Zone")
+
+// ─── Lower Pane ────────────────────────────────────────────────────────────
+plot(show_sm_plot ? sm_net_index : na, title="SM Net (from AA)",
+     color=sm_bullish ? #00e676 : sm_bearish ? #ff1744 : color.gray, linewidth=2)
+
+hline(0, "Zero", color=color.gray, linestyle=hline.style_dotted)
+hline(sm_threshold, "+Thr", color=color.new(color.green, 80))
+hline(-sm_threshold, "-Thr", color=color.new(color.red, 80))
+
+// ─── WARNING: Detect if input.source not linked ────────────────────────────
+var table warn_tbl = table.new(position.bottom_center, 1, 1)
+sources_not_linked = sm_buy_src == close and sm_sell_src == close
+if barstate.islast
+    if sources_not_linked
+        table.cell(warn_tbl, 0, 0, "  !! LINK SM SOURCES TO ALGOALPHA IN SETTINGS !!  ",
+                   text_color=color.white, bgcolor=color.red, text_size=size.normal)
+    else
+        table.cell(warn_tbl, 0, 0, "", bgcolor=color.new(color.black, 100))
+
+// ─── Info Table ────────────────────────────────────────────────────────────
+var table info = table.new(position.top_right, 2, 9, bgcolor=color.new(#1e1e1e, 10))
+if barstate.islast
+    table.cell(info, 0, 0, "v8 Fallback", text_color=color.white, text_size=size.small)
+    table.cell(info, 1, 0, sources_not_linked ? "NOT LINKED" : "AlgoAlpha SM",
+               text_color=sources_not_linked ? color.red : #00e676, text_size=size.small)
+    table.cell(info, 0, 1, "SM Net", text_color=color.gray, text_size=size.tiny)
+    table.cell(info, 1, 1, str.tostring(sm_net_index, "#.####"),
+               text_color=sm_bullish ? #00e676 : sm_bearish ? #ff1744 : color.gray, text_size=size.tiny)
+    table.cell(info, 0, 2, "RSI", text_color=color.gray, text_size=size.tiny)
+    table.cell(info, 1, 2, str.tostring(rsi_val, "#.#"),
+               text_color=rsi_in_buy_zone ? #2196f3 : rsi_in_sell_zone ? #e040fb : color.white, text_size=size.tiny)
+    table.cell(info, 0, 3, "TP/SL", text_color=color.gray, text_size=size.tiny)
+    table.cell(info, 1, 3, str.tostring(tp_pts, "#") + " / " + str.tostring(sl_pts, "#"),
+               text_color=color.white, text_size=size.tiny)
+    table.cell(info, 0, 4, "Cooldown", text_color=color.gray, text_size=size.tiny)
+    table.cell(info, 1, 4, str.tostring(cooldown) + " bars (5m)",
+               text_color=color.white, text_size=size.tiny)
+    table.cell(info, 0, 5, "SM Thr", text_color=color.gray, text_size=size.tiny)
+    table.cell(info, 1, 5, str.tostring(sm_threshold, "#.##"),
+               text_color=color.white, text_size=size.tiny)
+    table.cell(info, 0, 6, "Session", text_color=color.gray, text_size=size.tiny)
+    table.cell(info, 1, 6, in_entry_window ? "OPEN" : "CLOSED",
+               text_color=in_entry_window ? #00e676 : #ff1744, text_size=size.tiny)
+    table.cell(info, 0, 7, "Zone", text_color=color.gray, text_size=size.tiny)
+    zone_txt = rsi_in_buy_zone and sm_bullish ? "BUY" : rsi_in_sell_zone and sm_bearish ? "SELL" : "NEUTRAL"
+    zone_col = rsi_in_buy_zone and sm_bullish ? #00e676 : rsi_in_sell_zone and sm_bearish ? #ff1744 : color.gray
+    table.cell(info, 1, 7, zone_txt, text_color=zone_col, text_size=size.tiny)
+    table.cell(info, 0, 8, "State", text_color=color.gray, text_size=size.tiny)
+    state_txt = trade_state == 1 ? "LONG" : trade_state == -1 ? "SHORT" : can_enter ? "READY" : "WAIT"
+    state_col = trade_state != 0 ? #2196f3 : can_enter ? #00e676 : #ff1744
+    table.cell(info, 1, 8, state_txt + (in_entry_window ? "" : " [CLOSED]"), text_color=state_col, text_size=size.tiny)

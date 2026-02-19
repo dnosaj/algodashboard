@@ -1,0 +1,75 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © backtest_engine
+
+//@version=6
+strategy("EMA Crossover Long + Short", overlay=true,
+     initial_capital=1000,
+     default_qty_type=strategy.percent_of_equity,
+     default_qty_value=100,
+     commission_type=strategy.commission.percent,
+     commission_value=0.1,
+     slippage=0,
+     margin_long=0,
+     margin_short=0,
+     calc_on_every_tick=false,
+     fill_orders_on_standard_ohlc=true)
+
+// ── Inputs ──────────────────────────────────────────────────────────────────
+
+// Date range
+i_start = input.time(timestamp("2018-01-01"), "Start Date",
+     tooltip="Start date for the backtest. Set this to match the Python engine's start_date.")
+i_end   = input.time(timestamp("2069-12-31"), "End Date",
+     tooltip="End date for the backtest.")
+
+// Long EMA pair
+i_long_fast = input.int(9, "Long Fast EMA", minval=1,
+     tooltip="Fast EMA length for long entry/exit signals. Crossover = long entry, crossunder = long exit.")
+i_long_slow = input.int(21, "Long Slow EMA", minval=1,
+     tooltip="Slow EMA length for long entry/exit signals.")
+
+// Short EMA pair
+i_short_fast = input.int(5, "Short Fast EMA", minval=1,
+     tooltip="Fast EMA length for short entry/exit signals. Crossunder = short entry, crossover = short exit.")
+i_short_slow = input.int(13, "Short Slow EMA", minval=1,
+     tooltip="Slow EMA length for short entry/exit signals.")
+
+// ── Indicators ──────────────────────────────────────────────────────────────
+
+long_fast_ema  = ta.ema(close, i_long_fast)
+long_slow_ema  = ta.ema(close, i_long_slow)
+short_fast_ema = ta.ema(close, i_short_fast)
+short_slow_ema = ta.ema(close, i_short_slow)
+
+// ── Signals ─────────────────────────────────────────────────────────────────
+
+long_entry  = ta.crossover(long_fast_ema, long_slow_ema)
+long_exit   = ta.crossunder(long_fast_ema, long_slow_ema)
+short_entry = ta.crossunder(short_fast_ema, short_slow_ema)
+short_exit  = ta.crossover(short_fast_ema, short_slow_ema)
+
+// ── Date filter ─────────────────────────────────────────────────────────────
+
+in_range = time >= i_start and time <= i_end
+
+// ── Strategy execution ──────────────────────────────────────────────────────
+
+if in_range
+    // Long
+    if long_entry
+        strategy.entry("Long", strategy.long)
+    if long_exit
+        strategy.close("Long")
+
+    // Short
+    if short_entry
+        strategy.entry("Short", strategy.short)
+    if short_exit
+        strategy.close("Short")
+
+// ── Plots ───────────────────────────────────────────────────────────────────
+
+plot(long_fast_ema, "Long Fast EMA (9)", color=color.new(color.blue, 0), linewidth=1)
+plot(long_slow_ema, "Long Slow EMA (21)", color=color.new(color.orange, 0), linewidth=1)
+plot(short_fast_ema, "Short Fast EMA (5)", color=color.new(color.teal, 50), linewidth=1)
+plot(short_slow_ema, "Short Slow EMA (13)", color=color.new(color.red, 50), linewidth=1)

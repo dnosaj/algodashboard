@@ -1,0 +1,40 @@
+# Secrets & credentials
+.env
+*.env
+.env.*
+
+# macOS
+.DS_Store
+**/.DS_Store
+
+# Python
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+**/.pytest_cache/
+
+# Node
+node_modules/
+**/node_modules/
+**/dist/
+
+# Data files (too large for git, download via Databento / tastytrade)
+backtesting_engine/data/
+
+# Session replay files (regenerate with generate_session.py)
+live_trading/sessions/*.json
+
+# Logs
+live_trading/logs/
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Claude project config (local to machine)
+.claude/
