@@ -653,16 +653,18 @@ class IncrementalStrategy:
         )
         self.trades.append(trade)
 
+        # Reset position BEFORE emitting trade_closed so all subscribers
+        # (SafetyManager, advisors) see position == 0 during their handlers.
+        self.state.position = 0
+        self.state.exit_bar_idx = self.bar_idx
+        self.state.max_favorable = 0.0
+        self.state.trail_activated = False
+
         if self.event_bus:
             self.event_bus.emit("trade_closed", trade)
 
         logger.info(f"[{self.strategy_id}] CLOSE {side.upper()} @ {exit_price:.2f} "
                     f"PnL={pts:+.2f}pts (${pnl:+.2f}) reason={reason.value}")
-
-        self.state.position = 0
-        self.state.exit_bar_idx = self.bar_idx
-        self.state.max_favorable = 0.0
-        self.state.trail_activated = False
 
         sig_type = SignalType.CLOSE_LONG if side == "long" else SignalType.CLOSE_SHORT
         return Signal(

@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import type {
   BarData,
   ConnectionStatus,
+  SafetyStatusData,
   StatusData,
   Trade,
   DailyPnLEntry,
@@ -97,6 +98,10 @@ export function useWebSocket(url: string): UseWebSocketReturn {
         switch (message.type) {
           case 'status':
             setStatus(message.data as unknown as StatusData);
+            break;
+
+          case 'safety_status':
+            setStatus((prev) => prev ? { ...prev, safety: message.data as unknown as SafetyStatusData } : prev);
             break;
 
           case 'trade': {

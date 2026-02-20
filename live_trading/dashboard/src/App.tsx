@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useWebSocket } from './hooks/useWebSocket';
 import { StatusPanel } from './components/StatusPanel';
 import { Controls } from './components/Controls';
@@ -6,6 +7,7 @@ import { PriceChart } from './components/PriceChart';
 import { SignalFeed } from './components/SignalFeed';
 import { TradeLog } from './components/TradeLog';
 import { DailyPnL } from './components/DailyPnL';
+import { SafetyPanel } from './components/SafetyPanel';
 
 const WS_URL = `ws://${window.location.hostname}:${window.location.port || '8000'}/ws`;
 const FONT = "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace";
@@ -14,16 +16,24 @@ function App() {
   const { status, trades, dailyPnl, signals, bars, connected, sendCommand } =
     useWebSocket(WS_URL);
 
-  const mnqBars = bars['MNQ'] || [];
-  const mnqTrades = trades.filter((t) => t.instrument === 'MNQ');
+  const [selectedInstrument, setSelectedInstrument] = useState<string>('MNQ');
+
+  const chartBars = bars[selectedInstrument] || [];
+  const chartTrades = trades.filter((t) => t.instrument === selectedInstrument);
 
   const positions = status?.positions || [];
-  const mnqPos = positions.find((p) => p.instrument === 'MNQ') || {
-    instrument: 'MNQ', side: 'FLAT' as const, entry_price: null, unrealized_pnl: 0,
-  };
-  const mesPos = positions.find((p) => p.instrument === 'MES') || {
-    instrument: 'MES', side: 'FLAT' as const, entry_price: null, unrealized_pnl: 0,
-  };
+  // Prefer the non-FLAT MNQ position (could be V11 or V15)
+  const mnqPos = positions.find((p) => p.instrument === 'MNQ' && p.side !== 'FLAT')
+    || positions.find((p) => p.instrument === 'MNQ')
+    || { instrument: 'MNQ', side: 'FLAT' as const, entry_price: null, unrealized_pnl: 0 };
+  // Pair indicator data to the strategy that owns the shown position
+  const mnqStrategyId = mnqPos.strategy_id || 'MNQ_V11';
+  const mesPos = positions.find((p) => p.instrument === 'MES' && p.side !== 'FLAT')
+    || positions.find((p) => p.instrument === 'MES')
+    || { instrument: 'MES', side: 'FLAT' as const, entry_price: null, unrealized_pnl: 0 };
+  const mesStrategyId = mesPos.strategy_id || 'MES_V94';
+
+  const safetyStatus = status?.safety ?? null;
 
   return (
     <div style={{
@@ -53,14 +63,36 @@ function App() {
 
       {/* Instrument cards row */}
       <div style={{ display: 'flex', gap: 16, marginBottom: 16 }}>
-        <InstrumentCard position={mnqPos} data={status?.instruments?.['MNQ'] ?? null} />
-        <InstrumentCard position={mesPos} data={status?.instruments?.['MES'] ?? null} />
+        <InstrumentCard
+          position={mnqPos}
+          data={status?.instruments?.[mnqStrategyId] ?? null}
+          selected={selectedInstrument === 'MNQ'}
+          onSelect={() => setSelectedInstrument('MNQ')}
+        />
+        <InstrumentCard
+          position={mesPos}
+          data={status?.instruments?.[mesStrategyId] ?? null}
+          selected={selectedInstrument === 'MES'}
+          onSelect={() => setSelectedInstrument('MES')}
+        />
       </div>
 
-      {/* MNQ Price Chart */}
-      {mnqBars.length > 0 && (
+      {/* Safety controls panel */}
+      {safetyStatus && (
         <div style={{ marginBottom: 16 }}>
-          <PriceChart bars={mnqBars} trades={mnqTrades} instrument="MNQ" />
+          <SafetyPanel safety={safetyStatus} sendCommand={sendCommand} />
+        </div>
+      )}
+
+      {/* Price Chart (key forces remount on instrument switch) */}
+      {chartBars.length > 0 && (
+        <div style={{ marginBottom: 16 }}>
+          <PriceChart
+            key={selectedInstrument}
+            bars={chartBars}
+            trades={chartTrades}
+            instrument={selectedInstrument}
+          />
         </div>
       )}
 

@@ -130,9 +130,10 @@ MES_V94 = StrategyConfig(
     rsi_len=10, rsi_buy=55, rsi_sell=45,
     cooldown=15, max_loss_pts=0,  # Stop loss hurts MES
     dollar_per_pt=5.0,
+    commission_per_side=1.25,
 )
 
 DEFAULT_CONFIG = EngineConfig(
-    strategies=[MNQ_V11, MES_V94],
+    strategies=[MNQ_V11_1, MES_V94],
     safety=SafetyConfig(paper_mode=True),
 )

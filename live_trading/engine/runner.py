@@ -211,141 +211,8 @@ class MockOrderManager:
         return dict(self._positions)
 
 
-# ---------------------------------------------------------------------------
-# Safety manager
-# ---------------------------------------------------------------------------
-
-class SafetyManager:
-    """Enforces safety limits and circuit breakers.
-
-    Checks daily loss limits, consecutive loss streaks, position size
-    limits, and data feed health before allowing trades.
-    """
-
-    def __init__(self, config: EngineConfig):
-        self._config = config.safety
-        # Build per-instrument commission lookup
-        self._commissions: dict[str, float] = {}
-        for s in config.strategies:
-            self._commissions[s.instrument] = s.commission_per_side
-        self._daily_pnl: float = 0.0
-        self._consecutive_losses: int = 0
-        self._halted: bool = False
-        self._halt_reason: str = ""
-        self._last_bar_time: Optional[datetime] = None
-        self._trade_count_today: int = 0
-
-    @property
-    def halted(self) -> bool:
-        return self._halted
-
-    @property
-    def halt_reason(self) -> str:
-        return self._halt_reason
-
-    @property
-    def consecutive_losses(self) -> int:
-        return self._consecutive_losses
-
-    @property
-    def trade_count_today(self) -> int:
-        return self._trade_count_today
-
-    @property
-    def daily_pnl(self) -> float:
-        return self._daily_pnl
-
-    def on_bar(self, bar: Bar) -> None:
-        """Track when we last processed a bar for heartbeat monitoring."""
-        # Use wall clock time, not bar timestamp. Bar timestamps are from when
-        # the bar *started* (e.g., 16:47:00) but we process them 1-2 min later
-        # when the bar completes and the polling loop picks it up.
-        self._last_bar_time = datetime.now(timezone.utc)
-
-    def on_trade_closed(self, trade: TradeRecord) -> None:
-        """Update daily stats after trade closes (commission-adjusted)."""
-        # Deduct round-trip commission for accurate P&L tracking
-        commission = 2 * self._commissions.get(trade.instrument, 0.52)
-        adjusted_pnl = trade.pnl_dollar - commission
-
-        self._daily_pnl += adjusted_pnl
-        self._trade_count_today += 1
-
-        if adjusted_pnl < 0:
-            self._consecutive_losses += 1
-        else:
-            self._consecutive_losses = 0
-
-        logger.info(
-            f"[Safety] Trade: {trade.instrument} raw=${trade.pnl_dollar:+.2f} "
-            f"comm=${commission:.2f} adj=${adjusted_pnl:+.2f} | "
-            f"Daily=${self._daily_pnl:+.2f} ConsecLoss={self._consecutive_losses}"
-        )
-
-        # Check circuit breakers
-        if self._daily_pnl <= -self._config.max_daily_loss:
-            self._halted = True
-            self._halt_reason = (
-                f"Daily loss limit hit: ${self._daily_pnl:.2f} "
-                f"(limit: -${self._config.max_daily_loss:.2f})"
-            )
-            logger.warning(f"[Safety] HALTED: {self._halt_reason}")
-
-        if self._consecutive_losses >= self._config.max_consecutive_losses:
-            self._halted = True
-            self._halt_reason = (
-                f"Consecutive loss limit hit: {self._consecutive_losses} "
-                f"(limit: {self._config.max_consecutive_losses})"
-            )
-            logger.warning(f"[Safety] HALTED: {self._halt_reason}")
-
-    def check_can_trade(self, instrument: str, qty: int) -> tuple[bool, str]:
-        """Check if a trade is allowed. Returns (ok, reason)."""
-        if self._halted:
-            return False, f"Engine halted: {self._halt_reason}"
-
-        if qty > self._config.max_position_size:
-            return False, (
-                f"Position size {qty} exceeds limit {self._config.max_position_size}"
-            )
-
-        return True, ""
-
-    def check_heartbeat(self) -> tuple[bool, float]:
-        """Check data feed health. Returns (healthy, seconds_since_last_bar)."""
-        if self._last_bar_time is None:
-            return True, 0.0
-
-        now = datetime.now(timezone.utc)
-        if self._last_bar_time.tzinfo is None:
-            elapsed = (now.replace(tzinfo=None) - self._last_bar_time).total_seconds()
-        else:
-            elapsed = (now - self._last_bar_time).total_seconds()
-
-        healthy = elapsed < self._config.heartbeat_timeout_sec
-        return healthy, elapsed
-
-    def reset_daily(self) -> None:
-        """Reset daily counters (call at start of new trading day)."""
-        self._daily_pnl = 0.0
-        self._consecutive_losses = 0
-        self._trade_count_today = 0
-        self._halted = False
-        self._halt_reason = ""
-        logger.info("[Safety] Daily counters reset")
-
-    def get_status(self) -> dict:
-        """Return safety state for dashboard."""
-        healthy, elapsed = self.check_heartbeat()
-        return {
-            "halted": self._halted,
-            "halt_reason": self._halt_reason,
-            "daily_pnl": round(self._daily_pnl, 2),
-            "consecutive_losses": self._consecutive_losses,
-            "trade_count_today": self._trade_count_today,
-            "data_feed_healthy": healthy,
-            "seconds_since_last_bar": round(elapsed, 1),
-        }
+# SafetyManager imported from engine.safety_manager
+from engine.safety_manager import SafetyManager
 
 
 # ---------------------------------------------------------------------------
@@ -442,7 +309,15 @@ async def process_bar(
             instrument=bar.instrument,
             side=side,
             qty=1,
+            strategy_id=sid,
         )
+
+        # Apply SafetyManager qty override before advisors
+        if state.safety:
+            qty_override = state.safety.get_qty_override(sid)
+            if qty_override is not None:
+                context.qty = qty_override
+                context.qty_locked = True
 
         # Run advisors via event bus
         context = state.event_bus.emit_pre_order(context)
@@ -460,7 +335,8 @@ async def process_bar(
                 if s.config.instrument == bar.instrument
             )
             ok, reason = state.safety.check_can_trade(
-                bar.instrument, current_exposure + context.qty
+                bar.instrument, current_exposure + context.qty,
+                strategy_id=sid,
             )
             if not ok:
                 logger.warning(f"[Runner] Trade blocked by safety for {sid}: {reason}")
@@ -549,8 +425,16 @@ async def bar_polling_loop(state: EngineState) -> None:
 
 
 def _check_daily_reset(bar: Bar, state: EngineState) -> None:
-    """Reset daily counters if we've entered a new trading day."""
-    today = bar.timestamp.strftime("%Y-%m-%d")
+    """Reset daily counters if we've entered a new trading day.
+
+    Uses Eastern Time dates so the reset aligns with session boundaries
+    (session close ~16:00 ET), not midnight UTC (which falls mid-session
+    at 7-8 PM ET and would spuriously clear drawdown protection).
+    """
+    from zoneinfo import ZoneInfo
+    _ET = ZoneInfo("America/New_York")
+    bar_et = bar.timestamp.astimezone(_ET)
+    today = bar_et.strftime("%Y-%m-%d")
     if state.last_trading_day is None:
         state.last_trading_day = today
     elif today != state.last_trading_day:
@@ -746,6 +630,7 @@ def _build_engine_handle(state: EngineState) -> EngineHandle:
             "consecutive_losses": safety_status.get("consecutive_losses", 0),
             "broker": state.config.broker,
             "account": state.config.tastytrade.account_number if state.config.broker == "tastytrade" else "",
+            "safety": safety_status,
         }
 
     def get_trades() -> list[TradeRecord]:
@@ -795,6 +680,26 @@ def _build_engine_handle(state: EngineState) -> EngineHandle:
             })
         return result
 
+    def set_strategy_paused(strategy_id: str, paused: bool) -> tuple[bool, str]:
+        if state.safety:
+            return state.safety.set_strategy_paused(strategy_id, paused)
+        return False, "Safety manager not initialized"
+
+    def set_strategy_qty(strategy_id: str, qty: int) -> tuple[bool, str]:
+        if state.safety:
+            return state.safety.set_strategy_qty(strategy_id, qty)
+        return False, "Safety manager not initialized"
+
+    def set_drawdown_enabled(enabled: bool) -> tuple[bool, str]:
+        if state.safety:
+            return state.safety.set_drawdown_enabled(enabled)
+        return False, "Safety manager not initialized"
+
+    def force_resume_all() -> tuple[bool, str]:
+        if state.safety:
+            return state.safety.force_resume_all()
+        return False, "Safety manager not initialized"
+
     return EngineHandle(
         event_bus=state.event_bus,
         config=state.config,
@@ -804,6 +709,10 @@ def _build_engine_handle(state: EngineState) -> EngineHandle:
         pause_trading=pause_trading,
         resume_trading=resume_trading,
         kill_switch=kill_switch,
+        set_strategy_paused=set_strategy_paused,
+        set_strategy_qty=set_strategy_qty,
+        set_drawdown_enabled=set_drawdown_enabled,
+        force_resume_all=force_resume_all,
     )
 
 
@@ -857,7 +766,7 @@ async def run(config: EngineConfig) -> None:
         if result.get("skip"):
             context.skip = True
             context.skip_reason = result.get("reason", "advisor veto")
-        if "qty" in result:
+        if "qty" in result and not context.qty_locked:
             context.qty = result["qty"]
         return context
 
@@ -950,7 +859,7 @@ async def run(config: EngineConfig) -> None:
         logger.info("  Broker: mock (paper mode)")
 
     # --- 5. Initialize safety manager ---
-    safety = SafetyManager(config)
+    safety = SafetyManager(config, event_bus=event_bus)
     state.safety = safety
 
     # Register safety with event bus (only via event bus, no direct calls)

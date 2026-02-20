@@ -93,8 +93,16 @@ class FixedSizeAdvisor(Advisor):
         return self._stats[instrument]
 
     def on_signal(self, signal: Signal, context: PreOrderContext) -> dict:
-        """Return fixed qty. No veto logic for Day 1."""
+        """Return fixed qty unless SafetyManager locked the qty."""
         stats = self._get_stats(context.instrument)
+
+        # If SafetyManager set qty_locked, pass through its override
+        if context.qty_locked:
+            logger.debug(
+                f"[{self.name}] {context.instrument} {context.side} signal. "
+                f"qty_locked={context.qty} (SafetyManager override)"
+            )
+            return {"qty": context.qty}
 
         logger.debug(
             f"[{self.name}] {context.instrument} {context.side} signal. "

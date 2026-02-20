@@ -1,11 +1,14 @@
 export interface Position {
   instrument: string;
+  strategy_id?: string;
   side: 'FLAT' | 'LONG' | 'SHORT';
   entry_price: number | null;
   unrealized_pnl: number;
 }
 
 export interface InstrumentData {
+  instrument: string;
+  strategy_id: string;
   last_price: number;
   sm_value: number;
   rsi_value: number;
@@ -13,7 +16,8 @@ export interface InstrumentData {
   cooldown_total: number;
   max_loss_pts: number;
   bars_held: number;
-  version: string;
+  exit_mode: string;
+  tp_pts: number;
   long_used: boolean;
   short_used: boolean;
 }
@@ -55,6 +59,7 @@ export interface StatusData {
   consecutive_losses: number;
   broker: string;
   account: string;
+  safety?: SafetyStatusData;
 }
 
 export interface DailyPnLEntry {
@@ -73,7 +78,7 @@ export interface SignalEvent {
 }
 
 export interface WSMessage {
-  type: 'bar' | 'signal' | 'trade' | 'status' | 'fill' | 'error';
+  type: 'bar' | 'signal' | 'trade' | 'status' | 'safety_status' | 'fill' | 'error';
   data: Record<string, unknown>;
   ts: string;
 }
@@ -91,6 +96,34 @@ export interface SessionData {
   saved_at: string;
   bars: Record<string, BarData[]>;
   trades: Trade[];
+}
+
+export interface SafetyStrategyStatus {
+  strategy_id: string;
+  instrument: string;
+  paused: boolean;
+  pause_reason: string;
+  manual_override: boolean;
+  qty_override: number | null;
+  sl_count_today: number;
+  trade_count_today: number;
+  daily_pnl: number;
+}
+
+export interface SafetyStatusData {
+  halted: boolean;
+  halt_reason: string;
+  daily_pnl: number;
+  consecutive_losses: number;
+  trade_count_today: number;
+  data_feed_healthy: boolean;
+  seconds_since_last_bar: number;
+  drawdown_enabled: boolean;
+  drawdown_mode: 'NORMAL' | 'REDUCED' | 'EXTENDED_PAUSE';
+  extended_pause: boolean;
+  extended_pause_reason: string;
+  rolling_sl_5d: number;
+  strategies: Record<string, SafetyStrategyStatus>;
 }
 
 export type ConnectionStatus = 'connected' | 'disconnected' | 'reconnecting';

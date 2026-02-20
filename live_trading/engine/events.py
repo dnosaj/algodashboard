@@ -81,6 +81,8 @@ class PreOrderContext:
     qty: int = 1
     skip: bool = False  # Advisors can set True to veto (logged)
     skip_reason: str = ""
+    strategy_id: str = ""       # Which strategy generated this signal
+    qty_locked: bool = False    # True = SafetyManager set qty, advisors must not overwrite
 
 
 class EventBus:

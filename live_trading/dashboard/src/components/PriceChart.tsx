@@ -44,7 +44,16 @@ export function PriceChart({ bars, trades, instrument }: PriceChartProps) {
   const [replayLabel, setReplayLabel] = useState('');
   const [saving, setSaving] = useState(false);
 
-  const activeBars = replayMode ? replayBars : bars;
+  // Deduplicate bars by time (keep last occurrence) — lightweight-charts
+  // requires strictly ascending, unique timestamps.
+  const activeBarsRaw = replayMode ? replayBars : bars;
+  const activeBars = useMemo(() => {
+    const seen = new Map<number, BarData>();
+    for (const b of activeBarsRaw) {
+      seen.set(b.time, b);
+    }
+    return Array.from(seen.values()).sort((a, b) => a.time - b.time);
+  }, [activeBarsRaw]);
   const activeTrades = replayMode ? replayTrades : trades;
 
   // Fetch session list

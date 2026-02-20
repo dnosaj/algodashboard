@@ -182,6 +182,13 @@ export function TradeLog({ trades }: TradeLogProps) {
       ? ((winners / closedTrades.length) * 100).toFixed(1)
       : '0.0';
 
+  // Per-strategy P&L breakdown
+  const stratPnl: Record<string, number> = {};
+  for (const t of closedTrades) {
+    const key = t.strategy_id || t.instrument;
+    stratPnl[key] = (stratPnl[key] || 0) + (t.pnl || 0);
+  }
+
   // Sort trades: most recent first
   const sortedTrades = [...trades].sort(
     (a, b) => new Date(b.exit_time).getTime() - new Date(a.exit_time).getTime()
@@ -204,21 +211,21 @@ export function TradeLog({ trades }: TradeLogProps) {
             <thead>
               <tr>
                 <th style={styles.th}>Time</th>
-                <th style={styles.th}>Instrument</th>
+                <th style={styles.th}>Strategy</th>
                 <th style={styles.th}>Side</th>
                 <th style={{ ...styles.th, ...styles.thRight }}>Entry</th>
                 <th style={{ ...styles.th, ...styles.thRight }}>Exit</th>
                 <th style={{ ...styles.th, ...styles.thRight }}>Pts</th>
                 <th style={{ ...styles.th, ...styles.thRight }}>P&L</th>
-                <th style={styles.th}>Exit Reason</th>
+                <th style={styles.th}>Exit</th>
               </tr>
             </thead>
             <tbody>
               {sortedTrades.map((trade) => (
-                <tr key={trade.entry_time + trade.instrument} style={styles.row(trade.pnl)}>
+                <tr key={trade.entry_time + (trade.strategy_id || trade.instrument)} style={styles.row(trade.pnl)}>
                   <td style={styles.td}>{formatTime(trade.exit_time)}</td>
-                  <td style={{ ...styles.td, color: '#8888cc' }}>
-                    {trade.instrument}
+                  <td style={{ ...styles.td, color: '#8888cc', fontSize: 10 }}>
+                    {trade.strategy_id || trade.instrument}
                   </td>
                   <td style={styles.td}>
                     <span style={styles.sideBadge(trade.side)}>
@@ -249,7 +256,7 @@ export function TradeLog({ trades }: TradeLogProps) {
                   >
                     {formatPnl(trade.pnl)}
                   </td>
-                  <td style={{ ...styles.td, color: '#666' }}>
+                  <td style={{ ...styles.td, color: '#666', fontSize: 10 }}>
                     {trade.exit_reason || '--'}
                   </td>
                 </tr>
@@ -262,21 +269,27 @@ export function TradeLog({ trades }: TradeLogProps) {
       {closedTrades.length > 0 && (
         <div style={styles.summaryBar}>
           <span>
-            Closed:
-            <span style={styles.summaryValue()}>{closedTrades.length}</span>
-          </span>
-          <span>
             W/L:
             <span style={styles.summaryValue('#00ff88')}>{winners}</span>
             <span style={{ color: '#555' }}> / </span>
             <span style={styles.summaryValue('#ff4444')}>{losers}</span>
           </span>
           <span>
-            Win Rate:
+            WR:
             <span style={styles.summaryValue()}>{winRate}%</span>
           </span>
-          <span>
-            Net:
+          <span style={{ color: '#555' }}>|</span>
+          {Object.entries(stratPnl).map(([sid, pnl]) => (
+            <span key={sid}>
+              {sid}:
+              <span style={styles.summaryValue(pnl >= 0 ? '#00ff88' : '#ff4444')}>
+                {formatPnl(pnl)}
+              </span>
+            </span>
+          ))}
+          <span style={{ color: '#555' }}>|</span>
+          <span style={{ fontWeight: 700 }}>
+            Portfolio:
             <span
               style={styles.summaryValue(totalPnl >= 0 ? '#00ff88' : '#ff4444')}
             >

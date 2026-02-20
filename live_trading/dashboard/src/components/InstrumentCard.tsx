@@ -3,6 +3,8 @@ import type { Position, InstrumentData } from '../types';
 interface InstrumentCardProps {
   position: Position;
   data: InstrumentData | null;
+  selected?: boolean;
+  onSelect?: () => void;
 }
 
 const FONT = "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace";
@@ -134,25 +136,35 @@ function CooldownBar({ remaining, total }: { remaining: number; total: number })
   );
 }
 
-export function InstrumentCard({ position, data }: InstrumentCardProps) {
+export function InstrumentCard({ position, data, selected, onSelect }: InstrumentCardProps) {
   const inst = position.instrument;
   const side = position.side;
   const hasTrade = side !== 'FLAT';
   const sideColor = side === 'LONG' ? '#00ff88' : side === 'SHORT' ? '#ff4444' : '#555';
 
-  // Derive RSI buy/sell levels from version
-  const buyLevel = data?.version === 'v11' ? 60 : 55;
-  const sellLevel = data?.version === 'v11' ? 40 : 45;
+  // Derive RSI buy/sell levels from exit_mode / instrument
+  const isMNQv11 = data?.strategy_id?.includes('V11');
+  const buyLevel = isMNQv11 ? 60 : inst === 'MES' ? 55 : 60;
+  const sellLevel = isMNQv11 ? 40 : inst === 'MES' ? 45 : 40;
+
+  const borderColor = selected
+    ? '#8888cc'
+    : hasTrade ? `${sideColor}33` : '#2a2a4a';
 
   return (
-    <div style={{
-      backgroundColor: '#16213e',
-      borderRadius: 8,
-      padding: 16,
-      border: hasTrade ? `1px solid ${sideColor}33` : '1px solid #2a2a4a',
-      flex: 1,
-      minWidth: 320,
-    }}>
+    <div
+      onClick={onSelect}
+      style={{
+        backgroundColor: '#16213e',
+        borderRadius: 8,
+        padding: 16,
+        border: `1px solid ${borderColor}`,
+        flex: 1,
+        minWidth: 320,
+        cursor: onSelect ? 'pointer' : 'default',
+        boxShadow: selected ? '0 0 12px rgba(136,136,204,0.2)' : 'none',
+        transition: 'border-color 0.2s, box-shadow 0.2s',
+      }}>
       {/* Header: instrument + version + price */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
@@ -164,7 +176,7 @@ export function InstrumentCard({ position, data }: InstrumentCardProps) {
             backgroundColor: 'rgba(136,136,204,0.12)', color: '#8888cc',
             fontFamily: FONT, fontWeight: 600,
           }}>
-            {data?.version || '--'}
+            {data?.exit_mode === 'tp_scalp' ? `TP${data.tp_pts}` : data?.exit_mode || '--'}
           </span>
         </div>
         <div style={{ textAlign: 'right' }}>

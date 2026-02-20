@@ -30,9 +30,11 @@ from .models import (
     ControlAction,
     ControlActionType,
     DailyPnLEntry,
+    DrawdownToggleBody,
     EngineStatus,
     ErrorResponse,
     PositionInfo,
+    QtyOverrideBody,
     TradeResponse,
 )
 
@@ -64,6 +66,10 @@ class EngineHandle:
         pause_trading: Any = None,      # Callable[[], None]
         resume_trading: Any = None,     # Callable[[], tuple[bool, str]]
         kill_switch: Any = None,        # Callable[[], Awaitable[None]]
+        set_strategy_paused: Any = None,   # Callable[[str, bool], tuple[bool, str]]
+        set_strategy_qty: Any = None,      # Callable[[str, int], tuple[bool, str]]
+        set_drawdown_enabled: Any = None,  # Callable[[bool], tuple[bool, str]]
+        force_resume_all: Any = None,      # Callable[[], tuple[bool, str]]
     ):
         self.event_bus = event_bus
         self.config = config
@@ -73,6 +79,10 @@ class EngineHandle:
         self._pause_trading = pause_trading
         self._resume_trading = resume_trading
         self._kill_switch = kill_switch
+        self._set_strategy_paused = set_strategy_paused
+        self._set_strategy_qty = set_strategy_qty
+        self._set_drawdown_enabled = set_drawdown_enabled
+        self._force_resume_all = force_resume_all
 
     def get_status(self) -> dict:
         return self._get_status()
@@ -93,6 +103,26 @@ class EngineHandle:
 
     async def kill(self) -> None:
         await self._kill_switch()
+
+    def set_strategy_paused(self, strategy_id: str, paused: bool) -> tuple[bool, str]:
+        if self._set_strategy_paused:
+            return self._set_strategy_paused(strategy_id, paused)
+        return False, "Not available"
+
+    def set_strategy_qty(self, strategy_id: str, qty: int) -> tuple[bool, str]:
+        if self._set_strategy_qty:
+            return self._set_strategy_qty(strategy_id, qty)
+        return False, "Not available"
+
+    def set_drawdown_enabled(self, enabled: bool) -> tuple[bool, str]:
+        if self._set_drawdown_enabled:
+            return self._set_drawdown_enabled(enabled)
+        return False, "Not available"
+
+    def force_resume_all(self) -> tuple[bool, str]:
+        if self._force_resume_all:
+            return self._force_resume_all()
+        return False, "Not available"
 
     def get_config_snapshot(self) -> ConfigResponse:
         cfg = self.config
@@ -264,8 +294,8 @@ class EventBridge:
         self._enqueue("fill", fill)
 
     def _on_status_change(self, status: dict) -> None:
-        # Use "status" event name (matches dashboard WSMessage type)
-        self._enqueue("status", status)
+        # Use "safety_status" to avoid overwriting full StatusData on dashboard
+        self._enqueue("safety_status", status)
 
     def _on_error(self, error: dict) -> None:
         self._enqueue("error", error)
@@ -444,6 +474,8 @@ def create_app(handle: EngineHandle) -> FastAPI:
     @app.get("/api/session/{filename}")
     def load_session(filename: str) -> dict:
         """Load a saved session file."""
+        if "/" in filename or "\\" in filename or ".." in filename:
+            return {"error": "Invalid filename"}
         filepath = SESSIONS_DIR / filename
         if not filepath.exists() or not filepath.name.startswith("session_"):
             return {"error": "Session not found"}
@@ -470,6 +502,40 @@ def create_app(handle: EngineHandle) -> FastAPI:
             return {"status": "error", "detail": reason}
         logger.info("Trading resumed via API")
         return {"status": "resumed"}
+
+    # -------------------------------------------------------------------
+    # Safety control endpoints
+    # -------------------------------------------------------------------
+
+    @app.post("/api/safety/strategy/{strategy_id}/pause")
+    def pause_strategy(strategy_id: str) -> dict:
+        """Pause a specific strategy."""
+        ok, msg = handle.set_strategy_paused(strategy_id, True)
+        return {"ok": ok, "message": msg}
+
+    @app.post("/api/safety/strategy/{strategy_id}/resume")
+    def resume_strategy(strategy_id: str) -> dict:
+        """Resume a specific strategy (sets manual_override to prevent auto re-pause)."""
+        ok, msg = handle.set_strategy_paused(strategy_id, False)
+        return {"ok": ok, "message": msg}
+
+    @app.post("/api/safety/strategy/{strategy_id}/qty")
+    def set_strategy_qty(strategy_id: str, body: QtyOverrideBody) -> dict:
+        """Set contract qty override for a strategy. Body: {qty: N}"""
+        ok, msg = handle.set_strategy_qty(strategy_id, body.qty)
+        return {"ok": ok, "message": msg}
+
+    @app.post("/api/safety/drawdown/toggle")
+    def toggle_drawdown(body: DrawdownToggleBody) -> dict:
+        """Toggle auto drawdown rules. Body: {enabled: bool}"""
+        ok, msg = handle.set_drawdown_enabled(body.enabled)
+        return {"ok": ok, "message": msg}
+
+    @app.post("/api/control/force_resume")
+    def force_resume() -> dict:
+        """Force resume all — clear all pauses, halts, and overrides."""
+        ok, msg = handle.force_resume_all()
+        return {"ok": ok, "message": msg}
 
     @app.post("/api/control/kill")
     async def kill_trading() -> dict:
@@ -526,6 +592,34 @@ def create_app(handle: EngineHandle) -> FastAPI:
                             await ws_manager.broadcast("status", status)
                         except Exception:
                             pass
+                    elif command == "strategy_pause":
+                        sid = msg.get("strategy_id", "")
+                        ok, reason = handle.set_strategy_paused(sid, True)
+                        await ws.send_text(json.dumps({"ack": "strategy_paused" if ok else "error", "message": reason}))
+                    elif command == "strategy_resume":
+                        sid = msg.get("strategy_id", "")
+                        ok, reason = handle.set_strategy_paused(sid, False)
+                        await ws.send_text(json.dumps({"ack": "strategy_resumed" if ok else "error", "message": reason}))
+                    elif command == "strategy_qty":
+                        sid = msg.get("strategy_id", "")
+                        try:
+                            body = QtyOverrideBody(qty=msg.get("qty"))
+                        except Exception as e:
+                            await ws.send_text(json.dumps({"error": str(e)}))
+                            continue
+                        ok, reason = handle.set_strategy_qty(sid, body.qty)
+                        await ws.send_text(json.dumps({"ack": "strategy_qty_set" if ok else "error", "message": reason}))
+                    elif command == "drawdown_toggle":
+                        try:
+                            body = DrawdownToggleBody(enabled=msg.get("enabled"))
+                        except Exception as e:
+                            await ws.send_text(json.dumps({"error": str(e)}))
+                            continue
+                        ok, reason = handle.set_drawdown_enabled(body.enabled)
+                        await ws.send_text(json.dumps({"ack": "drawdown_toggled" if ok else "error", "message": reason}))
+                    elif command == "force_resume":
+                        ok, reason = handle.force_resume_all()
+                        await ws.send_text(json.dumps({"ack": "force_resumed" if ok else "error", "message": reason}))
                     else:
                         await ws.send_text(json.dumps({"error": f"unknown command: {command}"}))
                 except json.JSONDecodeError:

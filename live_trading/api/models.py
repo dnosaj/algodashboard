@@ -84,3 +84,17 @@ class ErrorResponse(BaseModel):
     """Standard error response."""
     detail: str
     code: str = "UNKNOWN"
+
+
+# ---------------------------------------------------------------------------
+# Request body models (shared by REST and WS handlers)
+# ---------------------------------------------------------------------------
+
+class QtyOverrideBody(BaseModel):
+    """Body for setting strategy qty override."""
+    qty: int = Field(gt=0, le=10)
+
+
+class DrawdownToggleBody(BaseModel):
+    """Body for toggling auto drawdown rules."""
+    enabled: bool
