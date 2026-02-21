@@ -1,7 +1,7 @@
 """
 Generate a session JSON file from backtest data for dashboard replay.
 
-Runs v11.1 (SM flip) and v15 (TP=5) MNQ strategies on Databento 1-min bars
+Runs vScalpA + vScalpB (MNQ) and MES v2 strategies on Databento 1-min bars
 and saves bars + trades in the session format the dashboard expects.
 
 Usage:
@@ -37,25 +37,49 @@ DATA_DIR = Path(__file__).resolve().parent.parent / "backtesting_engine" / "data
 SESSIONS_DIR = Path(__file__).resolve().parent / "sessions"
 SESSIONS_DIR.mkdir(exist_ok=True)
 
-# Shared SM params (v11 and v15 use the same)
-SM_INDEX = 10
-SM_FLOW = 12
-SM_NORM = 200
-SM_EMA = 100
-RSI_LEN = 8
-RSI_BUY = 60
-RSI_SELL = 40
-COOLDOWN = 20
-MAX_LOSS_PTS = 50
-DOLLAR_PER_PT = 2.0
-COMMISSION = 0.52
+# --- MNQ SM params (shared by vScalpA and vScalpB) ---
+MNQ_SM_INDEX = 10
+MNQ_SM_FLOW = 12
+MNQ_SM_NORM = 200
+MNQ_SM_EMA = 100
+MNQ_DOLLAR_PER_PT = 2.0
+MNQ_COMMISSION = 0.52
 
-# v11.1-specific
-V11_SM_THRESHOLD = 0.15
+# vScalpA (v15) params
+VSCALPA_RSI_LEN = 8
+VSCALPA_RSI_BUY = 60
+VSCALPA_RSI_SELL = 40
+VSCALPA_SM_THRESHOLD = 0.0
+VSCALPA_COOLDOWN = 20
+VSCALPA_MAX_LOSS_PTS = 50
+VSCALPA_TP_PTS = 5
 
-# v15-specific
-V15_SM_THRESHOLD = 0.0  # No threshold for v15
-V15_TP_PTS = 5
+# vScalpB params
+VSCALPB_RSI_LEN = 8
+VSCALPB_RSI_BUY = 55
+VSCALPB_RSI_SELL = 45
+VSCALPB_SM_THRESHOLD = 0.25
+VSCALPB_COOLDOWN = 20
+VSCALPB_MAX_LOSS_PTS = 15
+VSCALPB_TP_PTS = 5
+
+# --- MES SM params ---
+MES_SM_INDEX = 20
+MES_SM_FLOW = 12
+MES_SM_NORM = 400
+MES_SM_EMA = 255
+MES_DOLLAR_PER_PT = 5.0
+MES_COMMISSION = 1.25
+
+# MES v2 params
+MESV2_RSI_LEN = 12
+MESV2_RSI_BUY = 55
+MESV2_RSI_SELL = 45
+MESV2_SM_THRESHOLD = 0.0
+MESV2_COOLDOWN = 25
+MESV2_MAX_LOSS_PTS = 35
+MESV2_TP_PTS = 20
+MESV2_EOD_ET = 15 * 60 + 30  # 15:30 ET = 930 minutes
 
 
 def run_backtest_tp_exit(opens, highs, lows, closes, sm, times,
@@ -68,7 +92,7 @@ def run_backtest_tp_exit(opens, highs, lows, closes, sm, times,
     Exit priority:
       1. SL: prev bar close breaches max_loss_pts -> fill at next open
       2. TP: prev bar close reaches tp_pts profit -> fill at next open
-      3. EOD: 4 PM ET -> fill at close
+      3. EOD: eod_minutes_et -> fill at close
     No SM flip exit.
     """
     n = len(opens)
@@ -197,12 +221,12 @@ def compute_mfe_mae(trades, highs, lows):
             t['mae'] = float(np.max(bar_highs) - entry_p)
 
 
-def load_all_mnq_1min() -> pd.DataFrame:
-    """Load and concatenate all Databento MNQ 1-min files."""
-    files = sorted(DATA_DIR.glob("databento_MNQ_1min_*.csv"))
+def load_instrument_1min(instrument: str) -> pd.DataFrame:
+    """Load and concatenate all Databento 1-min files for an instrument."""
+    files = sorted(DATA_DIR.glob(f"databento_{instrument}_1min_*.csv"))
     if not files:
-        print("ERROR: No Databento MNQ 1-min files found in", DATA_DIR)
-        sys.exit(1)
+        print(f"WARNING: No Databento {instrument} 1-min files found in {DATA_DIR}")
+        return pd.DataFrame()
 
     dfs = []
     for f in files:
@@ -220,93 +244,44 @@ def load_all_mnq_1min() -> pd.DataFrame:
     combined = pd.concat(dfs)
     combined = combined[~combined.index.duplicated(keep='last')]
     combined = combined.sort_index()
-
-    # Compute SM on 1-min
-    sm = compute_smart_money(
-        combined['Close'].values, combined['Volume'].values,
-        index_period=SM_INDEX, flow_period=SM_FLOW,
-        norm_period=SM_NORM, ema_len=SM_EMA,
-    )
-    combined['SM_Net'] = sm
-
-    print(f"Loaded {len(combined)} bars from {len(files)} files")
-    print(f"  Range: {combined.index[0]} to {combined.index[-1]}")
     return combined
 
 
-def run_session(df_1m: pd.DataFrame, target_dates: list[str]) -> dict:
-    """Run v11 + v15 backtests and extract bars + trades for target dates."""
-
-    # Resample to 5-min for RSI mapping
-    df_5m = resample_to_5min(df_1m)
-    fivemin_times = df_5m.index.values
-    fivemin_closes = df_5m['Close'].values
-
-    # Prepare 1-min arrays
-    onemin_times = df_1m.index.values
-    rsi_5m_curr, rsi_5m_prev = map_5min_rsi_to_1min(
-        onemin_times, fivemin_times, fivemin_closes, rsi_len=RSI_LEN,
+def load_all_mnq_1min() -> pd.DataFrame:
+    """Load MNQ data and compute SM. Backwards-compatible wrapper."""
+    combined = load_instrument_1min("MNQ")
+    sm = compute_smart_money(
+        combined['Close'].values, combined['Volume'].values,
+        index_period=MNQ_SM_INDEX, flow_period=MNQ_SM_FLOW,
+        norm_period=MNQ_SM_NORM, ema_len=MNQ_SM_EMA,
     )
+    combined['SM_Net'] = sm
+    print(f"Loaded MNQ: {len(combined)} bars from {combined.index[0]} to {combined.index[-1]}")
+    return combined
 
-    opens = df_1m['Open'].values
-    highs = df_1m['High'].values
-    lows = df_1m['Low'].values
-    closes = df_1m['Close'].values
-    sm = df_1m['SM_Net'].values
-    times = df_1m.index
 
-    # Dummy RSI (not used when rsi_5m_curr/prev provided)
-    rsi_dummy = np.full(len(closes), 50.0)
-
-    # --- v11 backtest (SM flip exit, threshold=0.15) ---
-    v11_trades = run_backtest_v10(
-        opens, highs, lows, closes, sm, rsi_dummy, times,
-        rsi_buy=RSI_BUY, rsi_sell=RSI_SELL,
-        sm_threshold=V11_SM_THRESHOLD, cooldown_bars=COOLDOWN,
-        max_loss_pts=MAX_LOSS_PTS,
-        rsi_5m_curr=rsi_5m_curr, rsi_5m_prev=rsi_5m_prev,
-    )
-    compute_mfe_mae(v11_trades, highs, lows)
-
-    # --- v15 backtest (TP exit, threshold=0.0) ---
-    v15_trades = run_backtest_tp_exit(
-        opens, highs, lows, closes, sm, times,
-        rsi_5m_curr, rsi_5m_prev,
-        rsi_buy=RSI_BUY, rsi_sell=RSI_SELL,
-        sm_threshold=V15_SM_THRESHOLD, cooldown_bars=COOLDOWN,
-        max_loss_pts=MAX_LOSS_PTS, tp_pts=V15_TP_PTS,
-    )
-    compute_mfe_mae(v15_trades, highs, lows)
-
-    # Filter bars and trades for target dates
-    target_set = set(target_dates)
-
-    # Get bar indices for target dates
-    et_dates = pd.DatetimeIndex(times).tz_localize('UTC').tz_convert('America/New_York')
-    bar_dates = et_dates.strftime('%Y-%m-%d')
+def run_session(df_mnq: pd.DataFrame, target_dates: list[str],
+                df_mes: pd.DataFrame = None) -> dict:
+    """Run vScalpA + vScalpB + MES v2 backtests and extract bars + trades."""
 
     from zoneinfo import ZoneInfo
     _ET = ZoneInfo("America/New_York")
 
-    mask = np.isin(bar_dates, list(target_set))
-    filtered_bars = []
-    for i in np.where(mask)[0]:
-        utc_ts = pd.Timestamp(times[i])
-        if utc_ts.tzinfo is None:
-            utc_ts = utc_ts.tz_localize('UTC')
-        et_ts = utc_ts.tz_convert(_ET)
-        offset_seconds = int(et_ts.utcoffset().total_seconds())
-        filtered_bars.append({
-            "time": int(utc_ts.timestamp()) + offset_seconds,
-            "open": float(opens[i]),
-            "high": float(highs[i]),
-            "low": float(lows[i]),
-            "close": float(closes[i]),
-            "volume": float(df_1m['Volume'].values[i]),
-        })
+    target_set = set(target_dates)
 
-    def format_trades(raw_trades, strategy_id):
+    def prepare_arrays(df, rsi_len):
+        """Prepare 1-min arrays and 5-min RSI mapping for a dataframe."""
+        df_5m = resample_to_5min(df)
+        rsi_curr, rsi_prev = map_5min_rsi_to_1min(
+            df.index.values, df_5m.index.values, df_5m['Close'].values,
+            rsi_len=rsi_len,
+        )
+        return rsi_curr, rsi_prev
+
+    def format_trades(raw_trades, strategy_id, instrument, dollar_per_pt, commission):
+        """Format raw trade dicts into session JSON format."""
         result = []
+        times = df_mnq.index if instrument == "MNQ" else df_mes.index
         for t in raw_trades:
             exit_ts = pd.Timestamp(t['exit_time'])
             if exit_ts.tz is None:
@@ -317,15 +292,14 @@ def run_session(df_1m: pd.DataFrame, target_dates: list[str]) -> dict:
                 if entry_ts.tz is None:
                     entry_ts = entry_ts.tz_localize('UTC')
                 pnl_pts = t['pts']
-                pnl_dollar = pnl_pts * DOLLAR_PER_PT - 2 * COMMISSION
+                pnl_dollar = pnl_pts * dollar_per_pt - 2 * commission
 
-                # Compute ET epochs for chart marker alignment
                 entry_et = entry_ts.tz_convert(_ET)
                 entry_et_epoch = int(entry_ts.timestamp()) + int(entry_et.utcoffset().total_seconds())
                 exit_et_epoch = int(exit_ts.timestamp()) + int(exit_et.utcoffset().total_seconds())
 
                 result.append({
-                    "instrument": "MNQ",
+                    "instrument": instrument,
                     "strategy_id": strategy_id,
                     "side": t['side'].upper(),
                     "entry_price": float(t['entry']),
@@ -336,18 +310,109 @@ def run_session(df_1m: pd.DataFrame, target_dates: list[str]) -> dict:
                     "exit_time_et_epoch": exit_et_epoch,
                     "pts": float(pnl_pts),
                     "pnl": float(pnl_dollar),
-                    "exit_reason": t.get('result', 'SM_FLIP'),
+                    "exit_reason": t.get('result', 'TP'),
                     "bars_held": int(t['bars']),
                     "mfe": round(t.get('mfe', 0.0), 2),
                     "mae": round(t.get('mae', 0.0), 2),
                 })
         return result
 
-    filtered_v11 = format_trades(v11_trades, "MNQ_V11")
-    filtered_v15 = format_trades(v15_trades, "MNQ_V15")
+    def extract_bars(df, instrument):
+        """Extract bar data for target dates."""
+        et_dates = pd.DatetimeIndex(df.index).tz_localize('UTC').tz_convert('America/New_York')
+        bar_dates = et_dates.strftime('%Y-%m-%d')
+        mask = np.isin(bar_dates, list(target_set))
+        bars = []
+        for i in np.where(mask)[0]:
+            utc_ts = pd.Timestamp(df.index[i])
+            if utc_ts.tzinfo is None:
+                utc_ts = utc_ts.tz_localize('UTC')
+            et_ts = utc_ts.tz_convert(_ET)
+            offset_seconds = int(et_ts.utcoffset().total_seconds())
+            bars.append({
+                "time": int(utc_ts.timestamp()) + offset_seconds,
+                "open": float(df['Open'].values[i]),
+                "high": float(df['High'].values[i]),
+                "low": float(df['Low'].values[i]),
+                "close": float(df['Close'].values[i]),
+                "volume": float(df['Volume'].values[i]),
+            })
+        return bars
 
-    # Combine and sort by entry time
-    all_trades = filtered_v11 + filtered_v15
+    # --- MNQ strategies ---
+    mnq_opens = df_mnq['Open'].values
+    mnq_highs = df_mnq['High'].values
+    mnq_lows = df_mnq['Low'].values
+    mnq_closes = df_mnq['Close'].values
+    mnq_sm = df_mnq['SM_Net'].values
+    mnq_times = df_mnq.index
+
+    # vScalpA RSI (len=8)
+    rsi_a_curr, rsi_a_prev = prepare_arrays(df_mnq, VSCALPA_RSI_LEN)
+
+    # vScalpA backtest
+    vscalpa_trades = run_backtest_tp_exit(
+        mnq_opens, mnq_highs, mnq_lows, mnq_closes, mnq_sm, mnq_times,
+        rsi_a_curr, rsi_a_prev,
+        rsi_buy=VSCALPA_RSI_BUY, rsi_sell=VSCALPA_RSI_SELL,
+        sm_threshold=VSCALPA_SM_THRESHOLD, cooldown_bars=VSCALPA_COOLDOWN,
+        max_loss_pts=VSCALPA_MAX_LOSS_PTS, tp_pts=VSCALPA_TP_PTS,
+    )
+    compute_mfe_mae(vscalpa_trades, mnq_highs, mnq_lows)
+
+    # vScalpB RSI (also len=8, same mapping)
+    vscalpb_trades = run_backtest_tp_exit(
+        mnq_opens, mnq_highs, mnq_lows, mnq_closes, mnq_sm, mnq_times,
+        rsi_a_curr, rsi_a_prev,  # Same RSI len, reuse
+        rsi_buy=VSCALPB_RSI_BUY, rsi_sell=VSCALPB_RSI_SELL,
+        sm_threshold=VSCALPB_SM_THRESHOLD, cooldown_bars=VSCALPB_COOLDOWN,
+        max_loss_pts=VSCALPB_MAX_LOSS_PTS, tp_pts=VSCALPB_TP_PTS,
+    )
+    compute_mfe_mae(vscalpb_trades, mnq_highs, mnq_lows)
+
+    # Format MNQ trades
+    all_trades = []
+    all_trades.extend(format_trades(vscalpa_trades, "MNQ_V15", "MNQ",
+                                     MNQ_DOLLAR_PER_PT, MNQ_COMMISSION))
+    all_trades.extend(format_trades(vscalpb_trades, "MNQ_VSCALPB", "MNQ",
+                                     MNQ_DOLLAR_PER_PT, MNQ_COMMISSION))
+
+    # Extract MNQ bars
+    bars_dict = {"MNQ": extract_bars(df_mnq, "MNQ")}
+
+    # --- MES v2 strategy ---
+    if df_mes is not None and len(df_mes) > 0:
+        mes_sm = compute_smart_money(
+            df_mes['Close'].values, df_mes['Volume'].values,
+            index_period=MES_SM_INDEX, flow_period=MES_SM_FLOW,
+            norm_period=MES_SM_NORM, ema_len=MES_SM_EMA,
+        )
+        df_mes = df_mes.copy()
+        df_mes['SM_Net'] = mes_sm
+
+        mes_opens = df_mes['Open'].values
+        mes_highs = df_mes['High'].values
+        mes_lows = df_mes['Low'].values
+        mes_closes = df_mes['Close'].values
+        mes_times = df_mes.index
+
+        rsi_mes_curr, rsi_mes_prev = prepare_arrays(df_mes, MESV2_RSI_LEN)
+
+        mesv2_trades = run_backtest_tp_exit(
+            mes_opens, mes_highs, mes_lows, mes_closes, mes_sm, mes_times,
+            rsi_mes_curr, rsi_mes_prev,
+            rsi_buy=MESV2_RSI_BUY, rsi_sell=MESV2_RSI_SELL,
+            sm_threshold=MESV2_SM_THRESHOLD, cooldown_bars=MESV2_COOLDOWN,
+            max_loss_pts=MESV2_MAX_LOSS_PTS, tp_pts=MESV2_TP_PTS,
+            eod_minutes_et=MESV2_EOD_ET,
+        )
+        compute_mfe_mae(mesv2_trades, mes_highs, mes_lows)
+
+        all_trades.extend(format_trades(mesv2_trades, "MES_V2", "MES",
+                                         MES_DOLLAR_PER_PT, MES_COMMISSION))
+        bars_dict["MES"] = extract_bars(df_mes, "MES")
+
+    # Sort all trades by entry time
     all_trades.sort(key=lambda t: t['entry_time'])
 
     date_label = target_dates[0] if len(target_dates) == 1 else f"{target_dates[0]}_to_{target_dates[-1]}"
@@ -356,7 +421,7 @@ def run_session(df_1m: pd.DataFrame, target_dates: list[str]) -> dict:
         "date": date_label,
         "saved_at": datetime.utcnow().isoformat() + "Z",
         "timezone": "ET",
-        "bars": {"MNQ": filtered_bars},
+        "bars": bars_dict,
         "trades": all_trades,
     }
 
@@ -369,10 +434,19 @@ def main():
     parser.add_argument("--days", type=int, default=1, help="Number of recent days")
     args = parser.parse_args()
 
-    df = load_all_mnq_1min()
+    # Load MNQ
+    df_mnq = load_all_mnq_1min()
 
-    # Determine target dates
-    et_dates = pd.DatetimeIndex(df.index).tz_localize('UTC').tz_convert('America/New_York')
+    # Load MES
+    df_mes = load_instrument_1min("MES")
+    if len(df_mes) > 0:
+        print(f"Loaded MES: {len(df_mes)} bars from {df_mes.index[0]} to {df_mes.index[-1]}")
+    else:
+        print("No MES data found, running MNQ-only session")
+        df_mes = None
+
+    # Determine target dates (use MNQ dates as reference)
+    et_dates = pd.DatetimeIndex(df_mnq.index).tz_localize('UTC').tz_convert('America/New_York')
     unique_dates = sorted(set(et_dates.strftime('%Y-%m-%d')))
 
     if args.date:
@@ -382,13 +456,15 @@ def main():
 
     print(f"Target dates: {target_dates}")
 
-    session = run_session(df, target_dates)
+    session = run_session(df_mnq, target_dates, df_mes)
 
     bar_count = sum(len(b) for b in session['bars'].values())
     trade_count = len(session['trades'])
-    v11_count = sum(1 for t in session['trades'] if t['strategy_id'] == 'MNQ_V11')
-    v15_count = sum(1 for t in session['trades'] if t['strategy_id'] == 'MNQ_V15')
-    print(f"Result: {bar_count} bars, {trade_count} trades (v11: {v11_count}, v15: {v15_count})")
+    va_count = sum(1 for t in session['trades'] if t['strategy_id'] == 'MNQ_V15')
+    vb_count = sum(1 for t in session['trades'] if t['strategy_id'] == 'MNQ_VSCALPB')
+    mes_count = sum(1 for t in session['trades'] if t['strategy_id'] == 'MES_V2')
+    print(f"Result: {bar_count} bars, {trade_count} trades "
+          f"(vScalpA: {va_count}, vScalpB: {vb_count}, MES v2: {mes_count})")
 
     # Print trade summary
     if trade_count > 0:
@@ -396,10 +472,11 @@ def main():
         winners = sum(1 for t in session['trades'] if t['pnl'] > 0)
         print(f"  P&L: ${total_pnl:+.2f}  W/L: {winners}/{trade_count - winners}")
         for t in session['trades']:
-            strat = "v11" if "V11" in t['strategy_id'] else "v15"
-            print(f"    [{strat}] {t['side']:5s} @ {t['entry_price']:.2f} -> {t['exit_price']:.2f}  "
-                  f"{t['pts']:+.2f}pt  ${t['pnl']:+.2f}  MFE={t['mfe']:.1f} MAE={t['mae']:.1f}  "
-                  f"[{t['exit_reason']}]")
+            sid = t['strategy_id']
+            label = "vA" if "V15" in sid else "vB" if "VSCALPB" in sid else "MES"
+            print(f"    [{label:3s}] {t['instrument']} {t['side']:5s} @ {t['entry_price']:.2f} -> "
+                  f"{t['exit_price']:.2f}  {t['pts']:+.2f}pt  ${t['pnl']:+.2f}  "
+                  f"MFE={t['mfe']:.1f} MAE={t['mae']:.1f}  [{t['exit_reason']}]")
 
     # Save
     date_label = session['date']
