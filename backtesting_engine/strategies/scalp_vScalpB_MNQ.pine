@@ -1,0 +1,302 @@
+// SM+RSI vScalpB MNQ -- High-conviction TP scalp with tight stop
+// Based on v15 MNQ (TP exit). Changes from v15 (vScalpA):
+//   - SM threshold: 0.00 -> 0.25 (only trade strong SM signals)
+//   - RSI bands: 60/40 -> 55/45 (tighter, catches more entries within strong SM)
+//   - Max Loss: 50 -> 15 pts (tight stop, wrong fast = out fast)
+//   - TP: 5 pts (same as vScalpA)
+//
+// Designed to run ALONGSIDE vScalpA (v15) on the same chart. vScalpB takes
+// fewer trades but with higher conviction. 73% of vScalpB trades overlap
+// with vScalpA entries, but the tighter SL produces different outcomes.
+//
+// 12-month validation (Feb 2025 - Feb 2026):
+//   vScalpB: 345 trades, WR 72.8%, PF 1.273, +$1,106, MaxDD -$358, Sharpe 1.55
+//   IS:  WR 71.6%, PF 1.130, +$461
+//   OOS: WR 73.9%, PF 1.483, +$645
+//   Profitable on BOTH IS and OOS -- the only MNQ scalp strategy to do so.
+//
+// Architecture: 1-MIN chart. SM computed on 1-min. RSI on 5-min via
+// request.security(). Entry on SM direction (>0.25) + RSI cross. Exit on TP=5.
+//
+// SETUP:
+//   1. Open MNQ on a 1-MINUTE chart
+//   2. Add this strategy alongside vScalpA (v15)
+//   3. Scroll chart left to load 500+ bars of history
+//   4. Check Properties tab after loading (TV resets date range)
+//
+//@version=6
+strategy("SM+RSI vScalpB MNQ", overlay=true,
+     initial_capital=1000,
+     default_qty_type=strategy.fixed,
+     default_qty_value=1,
+     commission_type=strategy.commission.cash_per_contract,
+     commission_value=0.52,
+     slippage=0,
+     margin_long=0,
+     margin_short=0,
+     process_orders_on_close=false,
+     calc_on_every_tick=false,
+     fill_orders_on_standard_ohlc=true,
+     max_bars_back=5000)
+
+// --- Input Groups ---
+grp_sm    = "SMART MONEY (built-in, AlgoAlpha algorithm)"
+grp_rsi   = "RSI SETTINGS (5-min)"
+grp_trail = "TRAILING STOP"
+grp_exit  = "EXIT SETTINGS"
+grp_sess  = "SESSION FILTER"
+grp_disp  = "DISPLAY"
+
+// --- SM Inputs (must match vScalpA / v11 MNQ SM periods) ---
+sm_index   = input.int(10,  "SM Index Period",   minval=1, maxval=50,  group=grp_sm)
+sm_flow    = input.int(12,  "SM Flow Period",    minval=1, maxval=50,  group=grp_sm)
+sm_norm    = input.int(200, "SM Norm Period",    minval=50, maxval=1000, group=grp_sm)
+sm_ema_len = input.int(100, "SM EMA Length",     minval=10, maxval=500, group=grp_sm)
+sm_threshold = input.float(0.25, "SM Threshold", minval=0, step=0.05, group=grp_sm,
+     tooltip="Min |SM| for entry. 0.25 = high-conviction only. Validated on IS+OOS.")
+
+// --- RSI Inputs (tighter bands than vScalpA) ---
+rsi_len     = input.int(8,   "RSI Length",     minval=2,  maxval=50, group=grp_rsi)
+rsi_buy     = input.int(55,  "RSI Buy Level",  minval=50, maxval=90, group=grp_rsi,
+     tooltip="Tighter than vScalpA (60). Catches more entries within strong SM zones.")
+rsi_sell    = input.int(45,  "RSI Sell Level",  minval=10, maxval=50, group=grp_rsi,
+     tooltip="Tighter than vScalpA (40). Catches more entries within strong SM zones.")
+
+// --- Position Size ---
+qty = input.int(1, "Contracts", minval=1, maxval=20, group=grp_exit,
+     tooltip="Number of contracts per trade.")
+
+// --- Trail Inputs (inactive when TP fires first, kept for structure) ---
+trail_act_pts  = input.int(5,  "Trail Activate (pts)", minval=1, maxval=50, group=grp_trail,
+     tooltip="Start trailing after position is up this many points.")
+trail_dist_pts = input.int(8,  "Trail Distance (pts)", minval=1, maxval=50, group=grp_trail,
+     tooltip="Trail stop distance from max favorable price.")
+
+// --- Exit Inputs ---
+tp_pts       = input.int(5, "Take Profit (pts, 0=disabled)", minval=0, step=1, group=grp_exit,
+     tooltip="Close position after gaining this many points. Primary exit for vScalpB.")
+max_loss_pts = input.int(15, "Max Loss Stop (pts, 0=disabled)", minval=0, step=5, group=grp_exit,
+     tooltip="Tight stop: 15 pts. Wrong fast = out fast. vScalpA uses 50.")
+cooldown     = input.int(20, "Cooldown Bars", minval=0, maxval=150, group=grp_exit)
+
+// --- Session Inputs ---
+use_session = input.bool(true, "NY Session Only", group=grp_sess)
+sess_start  = input.session("1000-1545", "Entry Window (ET)",     group=grp_sess)
+sess_close  = input.session("0930-1600", "Session Close Window (ET)", group=grp_sess)
+
+// --- Display Inputs ---
+show_signals = input.bool(true, "Show Entry Signals",  group=grp_disp)
+show_sm_bg   = input.bool(true, "Show SM Background",  group=grp_disp)
+show_trail   = input.bool(true, "Show Trail Status",   group=grp_disp)
+
+// ============================================================================
+// SMART MONEY -- computed natively (AlgoAlpha algorithm, MPL 2.0)
+// ============================================================================
+dumb  = ta.pvi - ta.ema(ta.pvi, sm_ema_len)
+smart = ta.nvi - ta.ema(ta.nvi, sm_ema_len)
+
+drsi = ta.rsi(dumb, sm_flow)
+srsi = ta.rsi(smart, sm_flow)
+
+r_buy  = srsi / drsi
+r_sell = (100 - srsi) / (100 - drsi)
+
+sums_buy  = math.sum(r_buy, sm_index)
+sums_sell = math.sum(r_sell, sm_index)
+peak      = ta.highest(math.max(sums_buy, sums_sell), sm_norm)
+
+index_buy  = peak != 0 ? sums_buy / peak : 0.0
+index_sell = peak != 0 ? sums_sell / peak : 0.0
+sm_net_index = index_buy - index_sell
+
+sm_bull = sm_net_index > sm_threshold
+sm_bear = sm_net_index < -sm_threshold
+sm_flipped_bull = sm_net_index > 0 and sm_net_index[1] <= 0
+sm_flipped_bear = sm_net_index < 0 and sm_net_index[1] >= 0
+
+// ============================================================================
+// RSI -- computed on 5-min via request.security()
+// ============================================================================
+rsi_5m = request.security(syminfo.tickerid, "5", ta.rsi(close, rsi_len), lookahead=barmerge.lookahead_off)
+rsi_5m_prev = request.security(syminfo.tickerid, "5", ta.rsi(close, rsi_len)[1], lookahead=barmerge.lookahead_off)
+
+rsi_cross_up   = rsi_5m > rsi_buy and rsi_5m_prev <= rsi_buy
+rsi_cross_down = rsi_5m < rsi_sell and rsi_5m_prev >= rsi_sell
+
+// ============================================================================
+// STATE TRACKING
+// ============================================================================
+
+// Episode logic -- one entry per SM episode per direction
+var bool long_used  = false
+var bool short_used = false
+
+if not sm_bull or sm_flipped_bear
+    long_used := false
+if not sm_bear or sm_flipped_bull
+    short_used := false
+
+// Trail state
+var float max_fav         = 0.0
+var bool  trail_activated = false
+
+// Cooldown
+var int bars_since_exit = 9999
+bars_since_exit += 1
+cooldown_ok = bars_since_exit >= cooldown
+
+// Session filter
+in_entry_window = not use_session or not na(time(timeframe.period, sess_start, "America/New_York"))
+in_session      = not use_session or not na(time(timeframe.period, sess_close, "America/New_York"))
+
+// ============================================================================
+// EXIT LOGIC (processed before entries, priority: EOD > Max Loss > TP > Trail)
+// ============================================================================
+
+// Track max favorable excursion
+if strategy.position_size != 0
+    entry_p = strategy.position_avg_price
+    cur_fav = strategy.position_size > 0 ? close - entry_p : entry_p - close
+    if cur_fav > max_fav
+        max_fav := cur_fav
+
+// ---- 1. EOD CLOSE ----
+if strategy.position_size != 0 and not in_session
+    strategy.close_all(comment="EOD")
+    max_fav         := 0.0
+    trail_activated := false
+    bars_since_exit := 0
+
+// ---- 2. MAX LOSS STOP ----
+if max_loss_pts > 0
+    if strategy.position_size > 0 and close <= strategy.position_avg_price - max_loss_pts
+        strategy.close("Long", comment="Max Loss")
+        max_fav         := 0.0
+        trail_activated := false
+        bars_since_exit := 0
+    if strategy.position_size < 0 and close >= strategy.position_avg_price + max_loss_pts
+        strategy.close("Short", comment="Max Loss")
+        max_fav         := 0.0
+        trail_activated := false
+        bars_since_exit := 0
+
+// ---- 3. TAKE PROFIT ----
+if tp_pts > 0
+    if strategy.position_size > 0 and close >= strategy.position_avg_price + tp_pts
+        strategy.close("Long", comment="TP")
+        max_fav         := 0.0
+        trail_activated := false
+        bars_since_exit := 0
+    if strategy.position_size < 0 and close <= strategy.position_avg_price - tp_pts
+        strategy.close("Short", comment="TP")
+        max_fav         := 0.0
+        trail_activated := false
+        bars_since_exit := 0
+
+// ---- 4. TRAILING STOP EXIT ----
+if strategy.position_size != 0
+    // Activate trail once max_fav reaches threshold
+    if max_fav >= trail_act_pts
+        trail_activated := true
+
+    // Check trail stop
+    if trail_activated
+        entry_p_tr = strategy.position_avg_price
+        unrealized_tr = strategy.position_size > 0 ? close - entry_p_tr : entry_p_tr - close
+        trail_level = max_fav - trail_dist_pts
+        if unrealized_tr <= trail_level
+            if strategy.position_size > 0
+                strategy.close("Long", comment="Trail")
+            if strategy.position_size < 0
+                strategy.close("Short", comment="Trail")
+            max_fav         := 0.0
+            trail_activated := false
+            bars_since_exit := 0
+
+// ============================================================================
+// ENTRY LOGIC
+// ============================================================================
+
+long_entry  = sm_bull and rsi_cross_up   and not long_used  and in_entry_window and cooldown_ok
+short_entry = sm_bear and rsi_cross_down and not short_used and in_entry_window and cooldown_ok
+
+if long_entry and strategy.position_size == 0
+    strategy.entry("Long", strategy.long, qty=qty)
+    long_used       := true
+    max_fav         := 0.0
+    trail_activated := false
+    bars_since_exit := 9999
+
+if short_entry and strategy.position_size == 0
+    strategy.entry("Short", strategy.short, qty=qty)
+    short_used      := true
+    max_fav         := 0.0
+    trail_activated := false
+    bars_since_exit := 9999
+
+// ============================================================================
+// PLOTS
+// ============================================================================
+
+// SM background
+var color sm_bg_col = na
+if sm_net_index > sm_threshold
+    sm_bg_col := color.new(color.green, 85)
+else if sm_net_index < -sm_threshold
+    sm_bg_col := color.new(color.red, 85)
+else
+    sm_bg_col := color.new(color.gray, 95)
+bgcolor(show_sm_bg ? sm_bg_col : na)
+
+// Entry signals
+plotshape(show_signals and long_entry and strategy.position_size == 0, title="Long", style=shape.triangleup, location=location.belowbar, color=color.green, size=size.small, text="L")
+plotshape(show_signals and short_entry and strategy.position_size == 0, title="Short", style=shape.triangledown, location=location.abovebar, color=color.red, size=size.small, text="S")
+
+// Trail active indicator (blue tint)
+trail_bg = show_trail and trail_activated and strategy.position_size != 0 ? color.new(color.blue, 90) : na
+bgcolor(trail_bg)
+
+// ============================================================================
+// INFO TABLE
+// ============================================================================
+var table info = table.new(position.top_right, 2, 10, bgcolor=color.new(color.black, 80))
+if barstate.islastconfirmedhistory
+    table.cell(info, 0, 0, "vScalpB", text_color=color.white, text_size=size.small)
+    table.cell(info, 1, 0, "TP Scalp", text_color=color.aqua, text_size=size.small)
+
+    table.cell(info, 0, 1, "SM Idx/Flw", text_color=color.gray, text_size=size.small)
+    table.cell(info, 1, 1, str.tostring(sm_index) + "/" + str.tostring(sm_flow), text_color=color.white, text_size=size.small)
+    table.cell(info, 0, 2, "SM Nrm/EMA", text_color=color.gray, text_size=size.small)
+    table.cell(info, 1, 2, str.tostring(sm_norm) + "/" + str.tostring(sm_ema_len), text_color=color.white, text_size=size.small)
+
+    table.cell(info, 0, 3, "SM Thresh", text_color=color.gray, text_size=size.small)
+    table.cell(info, 1, 3, str.tostring(sm_threshold, "#.##"), text_color=color.yellow, text_size=size.small)
+
+    table.cell(info, 0, 4, "Take Profit", text_color=color.gray, text_size=size.small)
+    tp_text = tp_pts > 0 ? str.tostring(tp_pts) + " pts" : "OFF"
+    tp_col = tp_pts > 0 ? color.lime : color.gray
+    table.cell(info, 1, 4, tp_text, text_color=tp_col, text_size=size.small)
+
+    table.cell(info, 0, 5, "Max Loss", text_color=color.gray, text_size=size.small)
+    ml_text = max_loss_pts > 0 ? str.tostring(max_loss_pts) + " pts" : "OFF"
+    ml_col = max_loss_pts > 0 ? color.yellow : color.gray
+    table.cell(info, 1, 5, ml_text, text_color=ml_col, text_size=size.small)
+
+    table.cell(info, 0, 6, "Cooldown", text_color=color.gray, text_size=size.small)
+    table.cell(info, 1, 6, str.tostring(cooldown) + " bars", text_color=color.white, text_size=size.small)
+
+    table.cell(info, 0, 7, "SM Now", text_color=color.gray, text_size=size.small)
+    sm_col = sm_net_index > 0 ? color.green : color.red
+    table.cell(info, 1, 7, str.tostring(sm_net_index, "#.###"), text_color=sm_col, text_size=size.small)
+
+    table.cell(info, 0, 8, "5m RSI", text_color=color.gray, text_size=size.small)
+    rsi_col = color.white
+    if rsi_5m > rsi_buy
+        rsi_col := color.green
+    else if rsi_5m < rsi_sell
+        rsi_col := color.red
+    table.cell(info, 1, 8, str.tostring(rsi_5m, "#.#"), text_color=rsi_col, text_size=size.small)
+
+    rsi_label = "RSI" + str.tostring(rsi_len) + " " + str.tostring(rsi_buy) + "/" + str.tostring(rsi_sell)
+    table.cell(info, 0, 9, "RSI Cfg", text_color=color.gray, text_size=size.small)
+    table.cell(info, 1, 9, rsi_label, text_color=color.yellow, text_size=size.small)

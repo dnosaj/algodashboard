@@ -61,7 +61,8 @@ V15_TP_PTS = 5
 def run_backtest_tp_exit(opens, highs, lows, closes, sm, times,
                          rsi_5m_curr, rsi_5m_prev,
                          rsi_buy, rsi_sell, sm_threshold,
-                         cooldown_bars, max_loss_pts, tp_pts):
+                         cooldown_bars, max_loss_pts, tp_pts,
+                         eod_minutes_et=NY_CLOSE_ET):
     """v15-style backtest: same entries as v10, but TP exit instead of SM flip.
 
     Exit priority:
@@ -114,7 +115,7 @@ def run_backtest_tp_exit(opens, highs, lows, closes, sm, times,
             short_used = False
 
         # EOD close
-        if trade_state != 0 and bar_mins_et >= NY_CLOSE_ET:
+        if trade_state != 0 and bar_mins_et >= eod_minutes_et:
             side = "long" if trade_state == 1 else "short"
             close_trade(side, entry_price, closes[i], entry_idx, i, "EOD")
             trade_state = 0

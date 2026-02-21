@@ -138,7 +138,11 @@ class SafetyManager:
             )
             logger.warning(f"[Safety] HALTED: {self._halt_reason}")
 
-        # Auto drawdown rules — only V11 SL exits trigger rules
+        # Auto drawdown rules — only V11 SL exits trigger rules.
+        # NOTE: V11 (vWinners) is shelved as of Feb 2026 OOS deep dive.
+        # These rules are dormant while MNQ_V11 is not in the active config.
+        # TODO: Design new drawdown rules for vScalpA+vScalpB+MES_V2 portfolio
+        # once paper trading data is available.
         if (self._drawdown_enabled and trade.exit_reason == "SL"
                 and strat and strat.strategy_id == "MNQ_V11"):
             self._apply_drawdown_rules(strat)

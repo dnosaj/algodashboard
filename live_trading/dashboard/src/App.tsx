@@ -27,11 +27,11 @@ function App() {
     || positions.find((p) => p.instrument === 'MNQ')
     || { instrument: 'MNQ', side: 'FLAT' as const, entry_price: null, unrealized_pnl: 0 };
   // Pair indicator data to the strategy that owns the shown position
-  const mnqStrategyId = mnqPos.strategy_id || 'MNQ_V11';
+  const mnqStrategyId = mnqPos.strategy_id || 'MNQ_V15';
   const mesPos = positions.find((p) => p.instrument === 'MES' && p.side !== 'FLAT')
     || positions.find((p) => p.instrument === 'MES')
     || { instrument: 'MES', side: 'FLAT' as const, entry_price: null, unrealized_pnl: 0 };
-  const mesStrategyId = mesPos.strategy_id || 'MES_V94';
+  const mesStrategyId = mesPos.strategy_id || 'MES_V2';
 
   const safetyStatus = status?.safety ?? null;
 

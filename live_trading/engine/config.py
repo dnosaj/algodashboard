@@ -39,7 +39,7 @@ class StrategyConfig:
 class SafetyConfig:
     """Safety limits and circuit breakers."""
     max_daily_loss: float = 500.0     # Max daily loss in dollars before halt
-    max_position_size: int = 2        # Max contracts per instrument (across strategies)
+    max_position_size: int = 100      # Max contracts per instrument (raise for live)
     max_consecutive_losses: int = 5   # Consecutive losses before pause
     heartbeat_timeout_sec: int = 90   # Alert if no data for this long (polls every 60s)
     flatten_timeout_sec: int = 300   # Flatten all if no data for this long
@@ -99,15 +99,18 @@ MNQ_V11 = StrategyConfig(
     dollar_per_pt=2.0,
 )
 
-MNQ_V11_1 = StrategyConfig(
-    instrument="MNQ",
-    strategy_id="MNQ_V11",
-    sm_index=10, sm_flow=12, sm_norm=200, sm_ema=100,
-    sm_threshold=0.15,  # Filter whipsaw entries near SM zero
-    rsi_len=8, rsi_buy=60, rsi_sell=40,
-    cooldown=20, max_loss_pts=50,
-    dollar_per_pt=2.0,
-)
+# vWinners (v11.1) -- SHELVED: SM flip exit profitable on IS but loses on OOS.
+# No reliable regime detector found (Task 3). Kept for reference; re-enable
+# when a robust "let winners run" exit is found.
+# MNQ_V11_1 = StrategyConfig(
+#     instrument="MNQ",
+#     strategy_id="MNQ_V11",
+#     sm_index=10, sm_flow=12, sm_norm=200, sm_ema=100,
+#     sm_threshold=0.15,  # Filter whipsaw entries near SM zero
+#     rsi_len=8, rsi_buy=60, rsi_sell=40,
+#     cooldown=20, max_loss_pts=50,
+#     dollar_per_pt=2.0,
+# )
 
 MNQ_V15 = StrategyConfig(
     instrument="MNQ",
@@ -123,18 +126,49 @@ MNQ_V15 = StrategyConfig(
     dollar_per_pt=2.0,
 )
 
-MES_V94 = StrategyConfig(
+MNQ_VSCALPB = StrategyConfig(
+    instrument="MNQ",
+    strategy_id="MNQ_VSCALPB",
+    sm_index=10, sm_flow=12, sm_norm=200, sm_ema=100,
+    sm_threshold=0.25,  # High-conviction entries only
+    exit_mode="tp_scalp",
+    tp_pts=5,
+    trail_activate_pts=5,
+    trail_distance_pts=8,
+    rsi_len=8, rsi_buy=55, rsi_sell=45,  # Tighter bands than vScalpA
+    cooldown=20, max_loss_pts=15,  # Tight stop: wrong fast = out fast
+    dollar_per_pt=2.0,
+)
+
+# MES v9.4 -- REPLACED by MES_V2 (TP=20 exit). Kept for reference.
+# MES_V94 = StrategyConfig(
+#     instrument="MES",
+#     strategy_id="MES_V94",
+#     sm_index=20, sm_flow=12, sm_norm=400, sm_ema=255,
+#     rsi_len=10, rsi_buy=55, rsi_sell=45,
+#     cooldown=15, max_loss_pts=0,  # Stop loss hurts MES with SM flip exit
+#     dollar_per_pt=5.0,
+#     commission_per_side=1.25,
+#     session_close_et="15:30",
+# )
+
+MES_V2 = StrategyConfig(
     instrument="MES",
-    strategy_id="MES_V94",
+    strategy_id="MES_V2",
     sm_index=20, sm_flow=12, sm_norm=400, sm_ema=255,
-    rsi_len=10, rsi_buy=55, rsi_sell=45,
-    cooldown=15, max_loss_pts=0,  # Stop loss hurts MES
+    sm_threshold=0.0,  # MES weak entries are profitable
+    exit_mode="tp_scalp",
+    tp_pts=20,  # $100/contract — replaces SM flip exit
+    trail_activate_pts=20,
+    trail_distance_pts=8,
+    rsi_len=12, rsi_buy=55, rsi_sell=45,  # Slower RSI matches slow MES SM
+    cooldown=25, max_loss_pts=35,  # $175/contract — caps v9.4's uncapped losses
     dollar_per_pt=5.0,
     commission_per_side=1.25,
-    session_close_et="15:30",  # LOMO validated: 4/7 months, +$59, PF 1.228→1.266
+    session_close_et="15:30",  # EOD 15:30 ET validated for MES
 )
 
 DEFAULT_CONFIG = EngineConfig(
-    strategies=[MNQ_V11_1, MES_V94],
+    strategies=[MNQ_V15, MNQ_VSCALPB, MES_V2],
     safety=SafetyConfig(paper_mode=True),
 )

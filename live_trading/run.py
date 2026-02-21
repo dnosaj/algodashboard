@@ -19,9 +19,9 @@ from pathlib import Path
 from engine.config import (
     DEFAULT_CONFIG,
     EngineConfig,
-    MES_V94,
-    MNQ_V11_1,
+    MES_V2,
     MNQ_V15,
+    MNQ_VSCALPB,
     SafetyConfig,
     StrategyConfig,
     TastytradeConfig,
@@ -30,8 +30,8 @@ from engine.config import (
 
 # Each instrument maps to a list of strategy configs (multi-strategy per instrument)
 INSTRUMENT_CONFIGS: dict[str, list[StrategyConfig]] = {
-    "MNQ": [MNQ_V11_1, MNQ_V15],
-    "MES": [MES_V94],
+    "MNQ": [MNQ_V15, MNQ_VSCALPB],
+    "MES": [MES_V2],
 }
 
 

@@ -437,6 +437,8 @@ def run_backtest_v10(opens, highs, lows, closes, sm, rsi, times,
                      # Already tested features
                      sm_reversal_entry=False,
                      rsi_momentum_filter=False,
+                     # Dual SM: separate (faster) SM for exit flip detection
+                     sm_exit=None,
                      ):
     """
     Unified v10 backtest engine. All features OFF = identical to v9.
@@ -471,6 +473,7 @@ def run_backtest_v10(opens, highs, lows, closes, sm, rsi, times,
     short_used = False
     max_equity = 0.0
     has_mapped_rsi = rsi_5m_curr is not None and rsi_5m_prev is not None
+    sm_for_exit = sm_exit if sm_exit is not None else sm
 
     # Pre-compute ET minutes for every bar (DST-aware)
     et_mins = compute_et_minutes(times)
@@ -518,6 +521,10 @@ def run_backtest_v10(opens, highs, lows, closes, sm, rsi, times,
         sm_bear = sm_prev < -sm_threshold
         sm_flipped_bull = sm_prev > 0 and sm_prev2 <= 0
         sm_flipped_bear = sm_prev < 0 and sm_prev2 >= 0
+
+        # Exit flip signals (fast SM for exit if dual-SM enabled)
+        sm_exit_prev = sm_for_exit[i - 1]
+        sm_exit_prev2 = sm_for_exit[i - 2]
 
         # RSI cross detection + rsi_prev/rsi_prev2 for momentum filter
         if has_mapped_rsi:
@@ -649,8 +656,8 @@ def run_backtest_v10(opens, highs, lows, closes, sm, rsi, times,
                         max_equity = 0.0
                         continue
 
-            # SM flip exit
-            if sm_prev < 0 and sm_prev2 >= 0:
+            # SM flip exit (uses exit SM if dual-SM enabled)
+            if sm_exit_prev < 0 and sm_exit_prev2 >= 0:
                 close_trade("long", entry_price, opens[i], entry_idx, i, "SM_FLIP")
                 trade_state = 0
                 exit_bar = i
@@ -741,8 +748,8 @@ def run_backtest_v10(opens, highs, lows, closes, sm, rsi, times,
                         max_equity = 0.0
                         continue
 
-            # SM flip exit
-            if sm_prev > 0 and sm_prev2 <= 0:
+            # SM flip exit (uses exit SM if dual-SM enabled)
+            if sm_exit_prev > 0 and sm_exit_prev2 <= 0:
                 close_trade("short", entry_price, opens[i], entry_idx, i, "SM_FLIP")
                 trade_state = 0
                 exit_bar = i
