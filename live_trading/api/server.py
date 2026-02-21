@@ -384,13 +384,50 @@ def create_app(handle: EngineHandle) -> FastAPI:
     ws_manager = WebSocketManager()
     bridge = EventBridge(handle.event_bus, ws_manager)
 
+    # Auto-save state
+    _autosave_task: Optional[asyncio.Task] = None
+    _save_lock = asyncio.Lock()
+    AUTOSAVE_INTERVAL = 300  # 5 minutes
+
+    async def _autosave_loop() -> None:
+        """Background task: auto-save session every 5 minutes."""
+        await asyncio.sleep(60)  # Wait 1 min after startup before first save
+        while True:
+            try:
+                await asyncio.sleep(AUTOSAVE_INTERVAL)
+                async with _save_lock:
+                    trades = handle.get_trades()
+                    if trades:  # Only save if there are trades
+                        _do_save_session()
+                        logger.info(f"[AutoSave] Session saved ({len(trades)} trades)")
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"[AutoSave] Error: {e}")
+
     @app.on_event("startup")
     async def startup() -> None:
+        nonlocal _autosave_task
         bridge.start()
-        logger.info("API server started, WebSocket bridge active")
+        _autosave_task = asyncio.create_task(_autosave_loop())
+        logger.info("API server started, WebSocket bridge active, auto-save enabled")
 
     @app.on_event("shutdown")
     async def shutdown() -> None:
+        # Auto-save on shutdown
+        try:
+            trades = handle.get_trades()
+            if trades:
+                _do_save_session()
+                logger.info(f"[Shutdown] Session saved ({len(trades)} trades)")
+        except Exception as e:
+            logger.error(f"[Shutdown] Save failed: {e}")
+        if _autosave_task:
+            _autosave_task.cancel()
+            try:
+                await _autosave_task
+            except asyncio.CancelledError:
+                pass
         await bridge.stop()
         logger.info("API server shutting down")
 
@@ -475,9 +512,8 @@ def create_app(handle: EngineHandle) -> FastAPI:
     SESSIONS_DIR = Path(__file__).resolve().parent.parent / "sessions"
     SESSIONS_DIR.mkdir(exist_ok=True)
 
-    @app.post("/api/session/save")
-    def save_session() -> dict:
-        """Save current bars + trades to a JSON file for later replay."""
+    def _do_save_session() -> dict:
+        """Internal save logic — called by route, auto-save, and shutdown."""
         # Collect bars for all instruments
         bars_data: dict[str, list[dict]] = {}
         for sc in handle.config.strategies:
@@ -530,6 +566,11 @@ def create_app(handle: EngineHandle) -> FastAPI:
         filepath.write_text(json.dumps(session, indent=2))
         logger.info(f"Session saved: {filepath} ({sum(len(b) for b in bars_data.values())} bars, {len(trades_data)} trades)")
         return {"filename": filename, "bars": sum(len(b) for b in bars_data.values()), "trades": len(trades_data)}
+
+    @app.post("/api/session/save")
+    def save_session() -> dict:
+        """Save current bars + trades to a JSON file for later replay."""
+        return _do_save_session()
 
     @app.get("/api/sessions")
     def list_sessions() -> list[dict]:
