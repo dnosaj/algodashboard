@@ -17,6 +17,32 @@ interface PriceChartProps {
 
 const FONT = "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace";
 
+/** Compute ET offset in seconds for a given UTC epoch, DST-aware. */
+function getEtOffset(utcEpoch: number): number {
+  const dt = new Date(utcEpoch * 1000);
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: 'numeric',
+    minute: 'numeric',
+    hourCycle: 'h23',
+  });
+  const parts = formatter.formatToParts(dt);
+  const etYear = Number(parts.find((p) => p.type === 'year')?.value ?? 0);
+  const etMonth = Number(parts.find((p) => p.type === 'month')?.value ?? 1) - 1;
+  const etDay = Number(parts.find((p) => p.type === 'day')?.value ?? 1);
+  const etHour = Number(parts.find((p) => p.type === 'hour')?.value ?? 0);
+  const etMinute = Number(parts.find((p) => p.type === 'minute')?.value ?? 0);
+  const etAsUtcMs = Date.UTC(etYear, etMonth, etDay, etHour, etMinute);
+  const utcMs = Date.UTC(
+    dt.getUTCFullYear(), dt.getUTCMonth(), dt.getUTCDate(),
+    dt.getUTCHours(), dt.getUTCMinutes(),
+  );
+  return Math.round((etAsUtcMs - utcMs) / 1000);
+}
+
 const btnStyle = (active?: boolean): React.CSSProperties => ({
   padding: '4px 10px',
   fontSize: 10,
@@ -93,7 +119,18 @@ export function PriceChart({ bars, trades, instrument }: PriceChartProps) {
       const res = await fetch(`/api/session/${filename}`);
       if (res.ok) {
         const data: SessionData = await res.json();
-        const instBars = data.bars?.[instrument] || [];
+        let instBars = data.bars?.[instrument] || [];
+
+        // Backward compat: old sessions saved with UTC epochs need conversion
+        // New sessions have timezone="ET" and bar times are already ET-shifted
+        if (!data.timezone || data.timezone !== 'ET') {
+          // Convert UTC epochs to ET using DST-aware offset
+          instBars = instBars.map((b) => ({
+            ...b,
+            time: b.time + getEtOffset(b.time),
+          }));
+        }
+
         const instTrades = (data.trades || []).filter(
           (t) => t.instrument === instrument
         );
@@ -197,39 +234,69 @@ export function PriceChart({ bars, trades, instrument }: PriceChartProps) {
     if (!activeTrades || activeTrades.length === 0) return [];
 
     const mkrs: SeriesMarker<Time>[] = [];
+    const barTimes = activeBars.map((b) => b.time);
+
+    // Snap a raw timestamp to the nearest bar time (fixes MES marker alignment)
+    const snapToBar = (rawTime: number): number => {
+      if (barTimes.length === 0) return rawTime;
+      let closest = barTimes[0];
+      let minDist = Math.abs(barTimes[0] - rawTime);
+      for (const bt of barTimes) {
+        const dist = Math.abs(bt - rawTime);
+        if (dist < minDist) {
+          minDist = dist;
+          closest = bt;
+        }
+      }
+      return closest;
+    };
+
+    // Get ET epoch time for a trade timestamp, falling back to JS Date parsing
+    const getEtEpoch = (isoTime: string, etEpoch?: number): number => {
+      if (etEpoch != null) {
+        // Server already shifted to ET — snap to nearest minute
+        return Math.floor(etEpoch / 60) * 60;
+      }
+      // Legacy: parse ISO -> UTC, then shift to ET
+      const utcEpoch = Math.floor(new Date(isoTime).getTime() / 1000);
+      return Math.floor((utcEpoch + getEtOffset(utcEpoch)) / 60) * 60;
+    };
 
     for (const trade of activeTrades) {
       if (!trade.entry_time) continue;
 
       const isV15 = (trade.strategy_id || '').toLowerCase().includes('v15');
-      const entryTime = (Math.floor(
-        new Date(trade.entry_time).getTime() / 1000 / 60
-      ) * 60) as unknown as Time;
+      const isMES = (trade.strategy_id || '').toLowerCase().includes('mes');
+      const rawEntryTime = getEtEpoch(trade.entry_time, trade.entry_time_et_epoch);
+      const entryTime = snapToBar(rawEntryTime) as unknown as Time;
+
+      // Strategy-specific colors
+      let entryColor: string;
+      let entryText: string;
+      if (isMES) {
+        entryColor = trade.side === 'LONG' ? '#ffdd00' : '#ff66ff';
+        entryText = trade.side === 'LONG' ? 'MES L' : 'MES S';
+      } else if (isV15) {
+        entryColor = trade.side === 'LONG' ? '#00aaff' : '#ff8800';
+        entryText = trade.side === 'LONG' ? 'v15 L' : 'v15 S';
+      } else {
+        entryColor = trade.side === 'LONG' ? '#00ff88' : '#ff4444';
+        entryText = trade.side === 'LONG' ? 'L' : 'S';
+      }
 
       // Entry marker
-      if (trade.side === 'LONG') {
-        mkrs.push({
-          time: entryTime,
-          position: 'belowBar',
-          color: isV15 ? '#00aaff' : '#00ff88',
-          shape: 'arrowUp',
-          text: isV15 ? 'v15 L' : 'L',
-        });
-      } else {
-        mkrs.push({
-          time: entryTime,
-          position: 'aboveBar',
-          color: isV15 ? '#ff8800' : '#ff4444',
-          shape: 'arrowDown',
-          text: isV15 ? 'v15 S' : 'S',
-        });
-      }
+      mkrs.push({
+        time: entryTime,
+        position: trade.side === 'LONG' ? 'belowBar' : 'aboveBar',
+        color: entryColor,
+        shape: trade.side === 'LONG' ? 'arrowUp' : 'arrowDown',
+        text: entryText,
+      });
 
       // Exit marker
       if (trade.exit_time) {
-        const exitTime = (Math.floor(
-          new Date(trade.exit_time).getTime() / 1000 / 60
-        ) * 60) as unknown as Time;
+        const rawExitTime = getEtEpoch(trade.exit_time, trade.exit_time_et_epoch);
+        const exitTime = snapToBar(rawExitTime) as unknown as Time;
         const win = (trade.pnl || 0) >= 0;
 
         mkrs.push({
@@ -245,7 +312,7 @@ export function PriceChart({ bars, trades, instrument }: PriceChartProps) {
     // Lightweight Charts requires markers sorted by time
     mkrs.sort((a, b) => (a.time as number) - (b.time as number));
     return mkrs;
-  }, [activeTrades]);
+  }, [activeTrades, activeBars]);
 
   // Apply markers to series
   useEffect(() => {
@@ -281,7 +348,7 @@ export function PriceChart({ bars, trades, instrument }: PriceChartProps) {
               fontFamily: FONT,
             }}
           >
-            {instrument} 1m Chart
+            {instrument} 1m Chart (ET)
           </h3>
           {replayMode ? (
             <span

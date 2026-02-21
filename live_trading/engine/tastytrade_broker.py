@@ -262,9 +262,11 @@ class TastytradeBroker:
         """Place a market entry order.
 
         After the entry fills, automatically places:
-          - OCO bracket (TP + SL) if tp_pts > 0
-          - Simple STOP if max_loss_pts > 0 and no TP
-          - Nothing otherwise
+          - SL-only STOP if max_loss_pts > 0 (V11, V15)
+          - Nothing otherwise (MES V9.4)
+
+        TP is handled by IntraBarExitMonitor on real-time quotes, not
+        by exchange brackets, to support trailing stop logic.
 
         Args:
             instrument: "MNQ" or "MES"
@@ -317,14 +319,7 @@ class TastytradeBroker:
 
         # Auto-place bracket/stop based on strategy config
         strat = self._strategy_configs.get(sid)
-        if strat and strat.tp_pts > 0 and strat.max_loss_pts > 0:
-            # OCO bracket with TP + SL
-            await self.place_oco_bracket(
-                instrument, norm_side, qty, fill_price,
-                strat.max_loss_pts, strat.tp_pts,
-                strategy_id=sid,
-            )
-        elif strat and strat.max_loss_pts > 0:
+        if strat and strat.max_loss_pts > 0:
             # Simple stop only
             await self._place_stop(
                 instrument, norm_side, qty, fill_price, strat.max_loss_pts,
@@ -362,13 +357,31 @@ class TastytradeBroker:
             FillResult, or None if no position to close.
         """
         sid = strategy_id or instrument
+
+        # Cancel any resting stop order FIRST (before popping position)
+        # to prevent a race where the stop fills between pop and cancel,
+        # causing a double-close (market order on already-flat position).
+        bracket = self._brackets.get(sid)
+        if bracket and bracket.filled:
+            # Stop already triggered on exchange — position already closed
+            self._brackets.pop(sid, None)
+            self._positions.pop(sid, None)
+            logger.info(f"[TT] Stop already filled for {sid}, skipping close")
+            return None
+        await self._cancel_bracket(sid)
+
+        # Re-check: cancel may have discovered stop filled
+        bracket = self._brackets.get(sid)
+        if bracket and bracket.filled:
+            self._brackets.pop(sid, None)
+            self._positions.pop(sid, None)
+            logger.info(f"[TT] Stop filled during close for {sid}, skipping market close")
+            return None
+
         pos = self._positions.pop(sid, None)
         if pos is None:
             logger.warning(f"[TT] No position to close for {sid}")
             return None
-
-        # Cancel any resting stop order first
-        await self._cancel_bracket(sid)
 
         # Place market close
         future = self._futures[instrument]
@@ -389,9 +402,13 @@ class TastytradeBroker:
             f"{pos['qty']}x {instrument} strategy={sid}"
         )
 
-        response = await self._account.place_order(
-            self._session, order, dry_run=False
-        )
+        try:
+            response = await self._account.place_order(
+                self._session, order, dry_run=False
+            )
+        except Exception as e:
+            logger.critical(f"[TT] Market close order FAILED for {sid}: {e} — reconciliation will detect")
+            raise
 
         fill_price = await self._wait_for_fill(response.order, price_hint)
 
@@ -546,8 +563,9 @@ class TastytradeBroker:
 
     async def _cancel_bracket(self, strategy_id: str) -> None:
         """Cancel resting stop/bracket for a strategy."""
-        bracket = self._brackets.pop(strategy_id, None)
+        bracket = self._brackets.get(strategy_id)  # GET, not POP
         if bracket is None or bracket.filled:
+            self._brackets.pop(strategy_id, None)
             return
 
         try:
@@ -559,11 +577,19 @@ class TastytradeBroker:
                 await self._account.delete_order(
                     self._session, bracket.order_id
                 )
+            self._brackets.pop(strategy_id, None)  # Only pop on success
             logger.info(f"[TT] Resting stop cancelled for {strategy_id}")
         except Exception as e:
-            logger.error(
-                f"[TT] Failed to cancel stop for {strategy_id}: {e}"
-            )
+            if bracket.filled:
+                self._brackets.pop(strategy_id, None)
+                logger.info(f"[TT] Stop for {strategy_id} filled during cancel @ {bracket.fill_price:.2f}")
+            else:
+                # Do NOT pop -- the stop order may still be live on the exchange.
+                # Leave bracket for _process_alert_fill or reconciliation to handle.
+                logger.critical(
+                    f"[TT] Failed to cancel stop for {strategy_id}, NOT confirmed filled, "
+                    f"bracket KEPT for reconciliation: {e}"
+                )
 
     async def check_bracket_fills(self, strategy_id: str) -> Optional[dict]:
         """Check if a resting stop was triggered by the exchange.
@@ -695,16 +721,31 @@ class TastytradeBroker:
             logger.error("[TT] AlertStreamer max retries reached, stopping")
 
     async def _process_alert_fill(self, order: PlacedOrder) -> None:
-        """Check if a filled order matches an active bracket stop."""
+        """Check if a filled order matches an active bracket stop.
+
+        Matches by simple order_id OR by complex_order_id (OCO brackets).
+        Immediately pops the position so close_position() won't double-close.
+        """
         for sid, bracket in list(self._brackets.items()):
             if bracket.filled:
                 continue
 
-            # Match by order ID
+            # Match by simple order ID or OCO complex order ID
+            matched = False
             if bracket.order_id is not None and order.id == bracket.order_id:
+                matched = True
+            elif (bracket.is_oco and bracket.complex_order_id is not None
+                  and hasattr(order, 'complex_order_id')
+                  and order.complex_order_id == bracket.complex_order_id):
+                matched = True
+
+            if matched:
                 fill_price = self._extract_fill_price(order)
                 bracket.filled = True
                 bracket.fill_price = fill_price
+
+                # Pop position immediately so close_position() is a no-op
+                self._positions.pop(sid, None)
 
                 await self._bracket_fill_queue.put({
                     "instrument": bracket.instrument,

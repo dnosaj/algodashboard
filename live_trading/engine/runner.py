@@ -23,6 +23,7 @@ from engine.config import EngineConfig, StrategyConfig
 from engine.events import (
     Bar, EventBus, ExitReason, PreOrderContext, Signal, SignalType, TradeRecord,
 )
+from engine.intra_bar_monitor import IntraBarExitMonitor
 from engine.strategy import IncrementalStrategy
 from advisors.base import Advisor
 from advisors.sizing import FixedSizeAdvisor
@@ -241,6 +242,10 @@ class EngineState:
     last_prices: dict[str, float] = field(default_factory=dict)
     # Track last trading day for daily reset
     last_trading_day: Optional[str] = None
+    # Track last quote time for staleness detection (Fix #8)
+    last_quote_time: float = 0.0
+    # Flag for intra-bar monitor active state
+    intrabar_monitor_active: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -375,53 +380,104 @@ async def process_bar(
 # Async loops
 # ---------------------------------------------------------------------------
 
-async def bar_polling_loop(state: EngineState) -> None:
-    """Poll data feed every 60 seconds for new bars.
+async def bar_processing_loop(state: EngineState) -> None:
+    """Process bars immediately as they complete from the data feed.
 
-    Fetches one bar per unique instrument, then fans out to all strategies
-    that trade that instrument.
+    Replaces the 60s polling loop. Bars arrive via asyncio.Queue from the
+    TastytradeDataFeed, typically within ~100ms of bar completion.
     """
-    logger.info("[Runner] Bar polling loop started")
-
-    # Build instrument -> [strategy] mapping for fan-out
-    def _get_instrument_strategies() -> dict[str, list[IncrementalStrategy]]:
-        inst_map: dict[str, list[IncrementalStrategy]] = {}
-        for strat in state.strategies.values():
-            inst = strat.config.instrument
-            if inst not in inst_map:
-                inst_map[inst] = []
-            inst_map[inst].append(strat)
-        return inst_map
+    logger.info("[Runner] Bar processing loop started (event-driven)")
 
     while not state.shutdown_event.is_set():
-        if state.trading_active and state.data_feed and state.data_feed.connected:
-            inst_strategies = _get_instrument_strategies()
-            for inst, strategies in inst_strategies.items():
-                try:
-                    bar = await state.data_feed.get_latest_bar(inst)
-                    if bar is not None:
-                        logger.info(
-                            f"[Runner] Bar: {inst} {bar.timestamp.strftime('%H:%M')} UTC "
-                            f"O={bar.open:.2f} H={bar.high:.2f} L={bar.low:.2f} "
-                            f"C={bar.close:.2f} V={bar.volume:.0f}"
-                        )
-                        # Check for daily reset (new trading day)
-                        _check_daily_reset(bar, state)
-                        # Fan out to all strategies for this instrument
-                        for strategy in strategies:
-                            await process_bar(bar, strategy, state)
-                except Exception as e:
-                    logger.error(f"[Runner] Error processing bar for {inst}: {e}", exc_info=True)
-                    state.event_bus.emit("error", {"msg": str(e), "severity": "HIGH"})
+        try:
+            bar = await asyncio.wait_for(
+                state.data_feed.bar_queue.get(), timeout=65.0
+            )
+        except asyncio.TimeoutError:
+            continue  # No bar in 65s, loop back and check shutdown
+        except AttributeError:
+            # MockDataFeed doesn't have bar_queue -- fall back to sleep
+            await asyncio.sleep(60.0)
+            continue
+
+        if state.shutdown_event.is_set():
+            break
+        if not state.trading_active:
+            continue
+
+        inst = bar.instrument
+        strategies = [s for s in state.strategies.values()
+                      if s.config.instrument == inst]
+
+        logger.info(
+            f"[Runner] Bar: {inst} {bar.timestamp.strftime('%H:%M')} UTC "
+            f"O={bar.open:.2f} H={bar.high:.2f} L={bar.low:.2f} "
+            f"C={bar.close:.2f} V={bar.volume:.0f}"
+        )
 
         try:
-            await asyncio.wait_for(
-                state.shutdown_event.wait(),
-                timeout=60.0,
+            _check_daily_reset(bar, state)
+            for strategy in strategies:
+                async with strategy.trade_lock:
+                    await process_bar(bar, strategy, state)
+        except Exception as e:
+            logger.error(f"[Runner] Error processing bar for {inst}: {e}", exc_info=True)
+            state.event_bus.emit("error", {"msg": str(e), "severity": "HIGH"})
+
+        # Staleness check: disable intra-bar monitor if quotes stopped flowing
+        if state.intrabar_monitor_active and state.last_quote_time > 0:
+            if time.time() - state.last_quote_time > 60:
+                logger.warning("[Runner] Quote feed stale (>60s), disabling intra-bar monitor")
+                state.intrabar_monitor_active = False
+                for s in state.strategies.values():
+                    if hasattr(s, 'intrabar_monitor_active'):
+                        s.intrabar_monitor_active = False
+
+
+async def intra_bar_exit_loop(state: EngineState) -> None:
+    """Process real-time quotes for intra-bar TP/trail exits.
+
+    Reads from the data feed's quote queue and dispatches to the
+    IntraBarExitMonitor which checks TP/trail conditions on each tick.
+    """
+    logger.info("[Runner] Intra-bar exit monitor loop started")
+
+    monitor = IntraBarExitMonitor(
+        state.strategies, state.order_manager,
+        state.event_bus, state.safety,
+    )
+
+    # Activate the intrabar_monitor_active flag on monitored strategies
+    for sid in monitor._monitored:
+        state.strategies[sid].intrabar_monitor_active = True
+        logger.info(f"[Runner] Intra-bar monitoring active for {sid}")
+    state.intrabar_monitor_active = bool(monitor._monitored)
+
+    while not state.shutdown_event.is_set():
+        try:
+            quote = await asyncio.wait_for(
+                state.data_feed.quote_queue.get(), timeout=5.0
             )
-            break  # Shutdown signaled
         except asyncio.TimeoutError:
-            pass  # Normal timeout, continue polling
+            continue
+        except AttributeError:
+            # MockDataFeed doesn't have quote_queue
+            await asyncio.sleep(60.0)
+            continue
+
+        if state.shutdown_event.is_set():
+            break
+
+        instrument = state.data_feed.resolve_instrument(quote.event_symbol)
+        if instrument:
+            bid = float(quote.bid_price) if quote.bid_price else 0.0
+            ask = float(quote.ask_price) if quote.ask_price else 0.0
+            if bid > 0 and ask > 0:
+                # Update last price from quotes too
+                mid = (bid + ask) / 2.0
+                state.last_prices[instrument] = mid
+                state.last_quote_time = time.time()
+                await monitor.on_quote(instrument, bid, ask)
 
 
 def _check_daily_reset(bar: Bar, state: EngineState) -> None:
@@ -536,19 +592,35 @@ async def _emergency_flatten(state: EngineState, reason: str) -> None:
     state.trading_active = False
     for sid, strat in state.strategies.items():
         if strat.position != 0:
-            inst = strat.config.instrument
-            last_price = state.last_prices.get(inst, 0.0)
-            if last_price == 0.0:
-                logger.error(f"[Emergency] No last known price for {sid} ({inst}), using 0")
-            bar = Bar(
-                timestamp=datetime.now(timezone.utc),
-                open=last_price, high=last_price,
-                low=last_price, close=last_price,
-                volume=0, instrument=inst,
-            )
-            strat.force_close(bar, ExitReason.KILL_SWITCH)
-            if state.order_manager and state.order_manager.connected:
-                await state.order_manager.close_position(inst, last_price, strategy_id=sid)
+            async with strat.trade_lock:
+                if strat.position == 0:
+                    continue  # Closed by another path while waiting for lock
+                inst = strat.config.instrument
+                last_price = state.last_prices.get(inst, None)
+                if last_price is None:
+                    logger.warning(f"[Emergency] No last known price for {sid} ({inst}), attempting close with 0")
+                    last_price = 0.0
+                bar = Bar(
+                    timestamp=datetime.now(timezone.utc),
+                    open=last_price, high=last_price,
+                    low=last_price, close=last_price,
+                    volume=0, instrument=inst,
+                )
+                strat.force_close(bar, ExitReason.KILL_SWITCH)
+                if state.order_manager and state.order_manager.connected:
+                    try:
+                        fill = await state.order_manager.close_position(inst, last_price, strategy_id=sid)
+                        # Patch trade record with actual fill price
+                        if fill and strat.trades and abs(fill.price - last_price) > 0.001:
+                            trade = strat.trades[-1]
+                            trade._pre_correction_pnl = trade.pnl_dollar
+                            trade.exit_price = fill.price
+                            trade.pts = (fill.price - trade.entry_price if trade.side == "long"
+                                         else trade.entry_price - fill.price)
+                            trade.pnl_dollar = trade.pts * strat.config.dollar_per_pt
+                            state.event_bus.emit("trade_corrected", trade)
+                    except Exception as e:
+                        logger.critical(f"[Emergency] Close FAILED for {sid}: {e} — reconciliation will detect")
     logger.warning(f"[Emergency] All positions flattened ({reason})")
 
 
@@ -657,7 +729,14 @@ def _build_engine_handle(state: EngineState) -> EngineHandle:
         await _emergency_flatten(state, "kill_switch")
 
     def get_bars(instrument: str) -> list[dict]:
-        """Return all completed bars for an instrument as dicts."""
+        """Return all completed bars for an instrument as dicts.
+
+        Timestamps are shifted to ET epoch so the chart x-axis displays
+        Eastern Time (9:30 AM, 10:00 AM, etc.) without frontend conversion.
+        """
+        from zoneinfo import ZoneInfo
+        _ET = ZoneInfo("America/New_York")
+
         if state.data_feed is None:
             return []
         all_bars = getattr(state.data_feed, '_all_bars', None)
@@ -670,8 +749,11 @@ def _build_engine_handle(state: EngineState) -> EngineHandle:
             bars_deque = all_bars
         result = []
         for bar in sorted(bars_deque, key=lambda b: b.timestamp):
+            # Shift epoch by UTC-ET offset so chart displays ET time
+            et = bar.timestamp.astimezone(_ET)
+            offset_seconds = int(et.utcoffset().total_seconds())
             result.append({
-                "time": int(bar.timestamp.timestamp()),
+                "time": int(bar.timestamp.timestamp()) + offset_seconds,
                 "open": bar.open,
                 "high": bar.high,
                 "low": bar.low,
@@ -700,7 +782,41 @@ def _build_engine_handle(state: EngineState) -> EngineHandle:
             return state.safety.force_resume_all()
         return False, "Safety manager not initialized"
 
-    return EngineHandle(
+    async def close_strategy_position(strategy_id: str) -> tuple[bool, str]:
+        strat = state.strategies.get(strategy_id)
+        if not strat:
+            return False, f"Unknown strategy: {strategy_id}"
+        async with strat.trade_lock:
+            if strat.state.position == 0:
+                return False, "No open position"
+            inst = strat.config.instrument
+            last_price = state.last_prices.get(inst, 0.0)
+            bar = Bar(
+                timestamp=datetime.now(timezone.utc),
+                open=last_price, high=last_price,
+                low=last_price, close=last_price,
+                volume=0, instrument=inst,
+            )
+            strat.force_close(bar, ExitReason.MANUAL)
+            if state.order_manager and state.order_manager.connected:
+                try:
+                    fill = await state.order_manager.close_position(
+                        inst, last_price, strategy_id=strategy_id)
+                except Exception as e:
+                    logger.critical(f"[Runner] Manual close FAILED for {strategy_id}: {e} — reconciliation will detect")
+                    return True, f"Strategy closed locally but broker close failed: {e}"
+                # Patch trade record with actual fill price
+                if fill and strat.trades and abs(fill.price - last_price) > 0.001:
+                    trade = strat.trades[-1]
+                    trade._pre_correction_pnl = trade.pnl_dollar
+                    trade.exit_price = fill.price
+                    trade.pts = (fill.price - trade.entry_price if trade.side == "long"
+                                 else trade.entry_price - fill.price)
+                    trade.pnl_dollar = trade.pts * strat.config.dollar_per_pt
+                    state.event_bus.emit("trade_corrected", trade)
+            return True, f"Closed {strategy_id}"
+
+    handle = EngineHandle(
         event_bus=state.event_bus,
         config=state.config,
         get_status=get_status,
@@ -714,6 +830,8 @@ def _build_engine_handle(state: EngineState) -> EngineHandle:
         set_drawdown_enabled=set_drawdown_enabled,
         force_resume_all=force_resume_all,
     )
+    handle._close_strategy_position = close_strategy_position
+    return handle
 
 
 # ---------------------------------------------------------------------------
@@ -865,6 +983,40 @@ async def run(config: EngineConfig) -> None:
     # Register safety with event bus (only via event bus, no direct calls)
     event_bus.subscribe("bar", safety.on_bar)
     event_bus.subscribe("trade_closed", safety.on_trade_closed)
+    # trade_corrected: adjust P&L delta only (trade already counted by trade_closed)
+    def _on_trade_corrected(trade):
+        old_pnl = getattr(trade, '_pre_correction_pnl', None)
+        if old_pnl is None:
+            logger.warning(f"[Safety] Trade corrected but no _pre_correction_pnl stamp: {trade.strategy_id}")
+            return
+        strat_config = safety._strategy_configs.get(trade.strategy_id)
+        commission = 2 * (strat_config.commission_per_side if strat_config else 0.52)
+        delta = (trade.pnl_dollar - commission) - (old_pnl - commission)
+        if abs(delta) < 0.005:
+            return
+        # Warn if correction flips trade sign (consecutive_losses can't be fixed)
+        if (old_pnl - commission) >= 0 and (trade.pnl_dollar - commission) < 0:
+            logger.warning(f"[Safety] Correction flipped {trade.strategy_id} from win to loss — consecutive_losses may be stale")
+        elif (old_pnl - commission) < 0 and (trade.pnl_dollar - commission) >= 0:
+            logger.warning(f"[Safety] Correction flipped {trade.strategy_id} from loss to win — consecutive_losses may be stale")
+        safety._global_daily_pnl += delta
+        sid = trade.strategy_id or trade.instrument
+        strat_status = safety._strategies.get(sid)
+        if strat_status:
+            strat_status.daily_pnl += delta
+        # Re-check circuit breaker
+        if safety._global_daily_pnl <= -safety._config.max_daily_loss:
+            safety._halted = True
+            safety._halt_reason = f"Daily loss limit hit (corrected): ${safety._global_daily_pnl:.2f}"
+            logger.warning(f"[Safety] HALTED after correction: {safety._halt_reason}")
+        elif safety._halted and "Daily loss limit" in safety._halt_reason:
+            # Correction brought daily P&L back within limits — auto-clear halt
+            safety._halted = False
+            safety._halt_reason = ""
+            logger.info(f"[Safety] Halt CLEARED after correction: daily=${safety._global_daily_pnl:+.2f}")
+        logger.info(f"[Safety] Trade corrected: {trade.strategy_id} delta=${delta:+.2f} daily=${safety._global_daily_pnl:+.2f}")
+        safety._broadcast_status()
+    event_bus.subscribe("trade_corrected", _on_trade_corrected)
 
     # --- 6. Create strategies (keyed by strategy_id, not instrument) ---
     for strat_config in config.strategies:
@@ -937,7 +1089,8 @@ async def run(config: EngineConfig) -> None:
 
     # --- 11. Run all loops concurrently ---
     tasks = [
-        asyncio.create_task(bar_polling_loop(state), name="bar_poll"),
+        asyncio.create_task(bar_processing_loop(state), name="bar_process"),
+        asyncio.create_task(intra_bar_exit_loop(state), name="intrabar_monitor"),
         asyncio.create_task(reconciliation_loop(state), name="recon"),
         asyncio.create_task(heartbeat_loop(state), name="heartbeat"),
     ]

@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 
 try:
     from tastytrade import Session, DXLinkStreamer
-    from tastytrade.dxfeed import Candle
+    from tastytrade.dxfeed import Candle, Quote
     TASTYTRADE_AVAILABLE = True
 except ImportError:
     TASTYTRADE_AVAILABLE = False
@@ -93,6 +93,12 @@ class TastytradeDataFeed:
             inst: deque() for inst in instruments
         }
 
+        # Async queue for event-driven bar delivery (replaces polling)
+        self._bar_queue: asyncio.Queue = asyncio.Queue(maxsize=100)
+
+        # Async queue for real-time quote streaming (intra-bar exits)
+        self._quote_queue: asyncio.Queue = asyncio.Queue(maxsize=1000)
+
         # Background stream task
         self._stream_task: Optional[asyncio.Task] = None
         self._connected = False
@@ -102,6 +108,16 @@ class TastytradeDataFeed:
     @property
     def connected(self) -> bool:
         return self._connected
+
+    @property
+    def bar_queue(self) -> asyncio.Queue:
+        """Async queue of completed bars for event-driven processing."""
+        return self._bar_queue
+
+    @property
+    def quote_queue(self) -> asyncio.Queue:
+        """Async queue of real-time quotes for intra-bar exit monitoring."""
+        return self._quote_queue
 
     # ------------------------------------------------------------------
     # Connection
@@ -222,12 +238,11 @@ class TastytradeDataFeed:
     # ------------------------------------------------------------------
 
     async def _stream_loop(self) -> None:
-        """Background task: stream 1-min candles for all instruments.
+        """Background task: stream 1-min candles AND real-time quotes.
 
-        Uses DXLinkStreamer with subscribe_candle() which:
-          - First sends historical candles (backfill from start_time)
-          - Then continues with real-time candle updates
-          - Candles may update multiple times as the bar forms
+        Uses a single DXLinkStreamer with both candle and quote subscriptions.
+        Candle listener handles bar construction; quote listener feeds
+        the intra-bar exit monitor with real-time bid/ask prices.
         """
         retry_count = 0
         max_retries = 10
@@ -236,7 +251,6 @@ class TastytradeDataFeed:
             try:
                 async with DXLinkStreamer(self._session) as streamer:
                     # Subscribe to 1-min candles starting from warmup period ago
-                    # Add 50% buffer to account for non-RTH gaps
                     lookback_minutes = int(self._warmup_count * 1.5)
                     start_time = datetime.now(timezone.utc) - timedelta(
                         minutes=lookback_minutes
@@ -247,22 +261,28 @@ class TastytradeDataFeed:
                         symbols=symbols,
                         interval="1m",
                         start_time=start_time,
-                        # Must be True for futures — tho=true coarsens bars
-                        # for instruments that trade extended hours.
-                        # Session filtering is done by the strategy, not the feed.
                         extended_trading_hours=True,
                     )
 
+                    # Subscribe to real-time quotes for intra-bar exit monitoring
+                    await streamer.subscribe(Quote, symbols)
+
                     retry_count = 0  # Reset on success
                     logger.info(
-                        f"[TT Feed] Candle stream connected "
+                        f"[TT Feed] Candle + Quote stream connected "
                         f"(streamer symbols: {symbols})"
                     )
 
-                    async for candle in streamer.listen(Candle):
-                        if not self._connected:
-                            break
-                        self._process_candle(candle)
+                    # Run candle and quote listeners concurrently
+                    candle_task = asyncio.create_task(
+                        self._candle_listen(streamer),
+                        name="tt_candle_listen",
+                    )
+                    quote_task = asyncio.create_task(
+                        self._quote_listen(streamer),
+                        name="tt_quote_listen",
+                    )
+                    await asyncio.gather(candle_task, quote_task)
 
             except asyncio.CancelledError:
                 break
@@ -279,6 +299,28 @@ class TastytradeDataFeed:
         if retry_count >= max_retries:
             logger.error("[TT Feed] Max retries reached, feed stopped")
             self._connected = False
+
+    async def _candle_listen(self, streamer: "DXLinkStreamer") -> None:
+        """Listen for candle events from the streamer."""
+        async for candle in streamer.listen(Candle):
+            if not self._connected:
+                break
+            self._process_candle(candle)
+
+    async def _quote_listen(self, streamer: "DXLinkStreamer") -> None:
+        """Listen for quote events and push to the quote queue."""
+        async for quote in streamer.listen(Quote):
+            if not self._connected:
+                break
+            try:
+                self._quote_queue.put_nowait(quote)
+            except asyncio.QueueFull:
+                # Drop oldest quote to make room (quotes are ephemeral)
+                try:
+                    self._quote_queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    pass
+                self._quote_queue.put_nowait(quote)
 
     def _process_candle(self, candle: "Candle") -> None:
         """Convert a DXLink Candle event to a Bar and buffer it.
@@ -335,6 +377,17 @@ class TastytradeDataFeed:
             self._all_bars[instrument].append(current)
             self._pending_bars[instrument].append(current)
             self._current_bar[instrument] = bar
+            # Push to async queue for event-driven processing (skip during warmup)
+            if self._warmup_complete.is_set():
+                try:
+                    self._bar_queue.put_nowait(current)
+                except asyncio.QueueFull:
+                    # Drop oldest bar to make room
+                    try:
+                        self._bar_queue.get_nowait()
+                    except asyncio.QueueEmpty:
+                        pass
+                    self._bar_queue.put_nowait(current)
         elif bar.timestamp < current.timestamp:
             # Historical backfill (reverse order) -- this bar is complete
             self._all_bars[instrument].append(bar)
@@ -342,7 +395,7 @@ class TastytradeDataFeed:
             # Same timestamp -- update the forming bar
             self._current_bar[instrument] = bar
 
-    def _resolve_instrument(self, event_symbol: Optional[str]) -> Optional[str]:
+    def resolve_instrument(self, event_symbol: Optional[str]) -> Optional[str]:
         """Map a DXLink event_symbol back to instrument name.
 
         DXLink event symbols look like: '/MNQH26:XCME{=1m,tho=true}'
@@ -356,3 +409,6 @@ class TastytradeDataFeed:
                 return inst
 
         return None
+
+    # Keep private alias for backward compat within this file
+    _resolve_instrument = resolve_instrument

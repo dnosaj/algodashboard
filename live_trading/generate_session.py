@@ -284,11 +284,19 @@ def run_session(df_1m: pd.DataFrame, target_dates: list[str]) -> dict:
     et_dates = pd.DatetimeIndex(times).tz_localize('UTC').tz_convert('America/New_York')
     bar_dates = et_dates.strftime('%Y-%m-%d')
 
+    from zoneinfo import ZoneInfo
+    _ET = ZoneInfo("America/New_York")
+
     mask = np.isin(bar_dates, list(target_set))
     filtered_bars = []
     for i in np.where(mask)[0]:
+        utc_ts = pd.Timestamp(times[i])
+        if utc_ts.tzinfo is None:
+            utc_ts = utc_ts.tz_localize('UTC')
+        et_ts = utc_ts.tz_convert(_ET)
+        offset_seconds = int(et_ts.utcoffset().total_seconds())
         filtered_bars.append({
-            "time": int(pd.Timestamp(times[i]).timestamp()),
+            "time": int(utc_ts.timestamp()) + offset_seconds,
             "open": float(opens[i]),
             "high": float(highs[i]),
             "low": float(lows[i]),
@@ -305,8 +313,15 @@ def run_session(df_1m: pd.DataFrame, target_dates: list[str]) -> dict:
             exit_et = exit_ts.tz_convert('America/New_York')
             if exit_et.strftime('%Y-%m-%d') in target_set:
                 entry_ts = pd.Timestamp(t['entry_time'])
+                if entry_ts.tz is None:
+                    entry_ts = entry_ts.tz_localize('UTC')
                 pnl_pts = t['pts']
                 pnl_dollar = pnl_pts * DOLLAR_PER_PT - 2 * COMMISSION
+
+                # Compute ET epochs for chart marker alignment
+                entry_et = entry_ts.tz_convert(_ET)
+                entry_et_epoch = int(entry_ts.timestamp()) + int(entry_et.utcoffset().total_seconds())
+                exit_et_epoch = int(exit_ts.timestamp()) + int(exit_et.utcoffset().total_seconds())
 
                 result.append({
                     "instrument": "MNQ",
@@ -316,6 +331,8 @@ def run_session(df_1m: pd.DataFrame, target_dates: list[str]) -> dict:
                     "exit_price": float(t['exit']),
                     "entry_time": str(entry_ts.isoformat()),
                     "exit_time": str(exit_ts.isoformat()),
+                    "entry_time_et_epoch": entry_et_epoch,
+                    "exit_time_et_epoch": exit_et_epoch,
                     "pts": float(pnl_pts),
                     "pnl": float(pnl_dollar),
                     "exit_reason": t.get('result', 'SM_FLIP'),
@@ -337,6 +354,7 @@ def run_session(df_1m: pd.DataFrame, target_dates: list[str]) -> dict:
     session = {
         "date": date_label,
         "saved_at": datetime.utcnow().isoformat() + "Z",
+        "timezone": "ET",
         "bars": {"MNQ": filtered_bars},
         "trades": all_trades,
     }

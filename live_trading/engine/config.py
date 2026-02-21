@@ -131,6 +131,7 @@ MES_V94 = StrategyConfig(
     cooldown=15, max_loss_pts=0,  # Stop loss hurts MES
     dollar_per_pt=5.0,
     commission_per_side=1.25,
+    session_close_et="15:30",  # LOMO validated: 4/7 months, +$59, PF 1.228→1.266
 )
 
 DEFAULT_CONFIG = EngineConfig(

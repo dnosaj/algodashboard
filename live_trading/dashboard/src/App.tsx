@@ -80,7 +80,7 @@ function App() {
       {/* Safety controls panel */}
       {safetyStatus && (
         <div style={{ marginBottom: 16 }}>
-          <SafetyPanel safety={safetyStatus} sendCommand={sendCommand} />
+          <SafetyPanel safety={safetyStatus} positions={positions} sendCommand={sendCommand} />
         </div>
       )}
 

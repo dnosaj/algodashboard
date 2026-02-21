@@ -83,6 +83,7 @@ class EngineHandle:
         self._set_strategy_qty = set_strategy_qty
         self._set_drawdown_enabled = set_drawdown_enabled
         self._force_resume_all = force_resume_all
+        self._close_strategy_position = None  # Set later if available
 
     def get_status(self) -> dict:
         return self._get_status()
@@ -122,6 +123,11 @@ class EngineHandle:
     def force_resume_all(self) -> tuple[bool, str]:
         if self._force_resume_all:
             return self._force_resume_all()
+        return False, "Not available"
+
+    async def close_strategy_position(self, strategy_id: str) -> tuple[bool, str]:
+        if self._close_strategy_position:
+            return await self._close_strategy_position(strategy_id)
         return False, "Not available"
 
     def get_config_snapshot(self) -> ConfigResponse:
@@ -220,6 +226,7 @@ class EventBridge:
         event_bus.subscribe("bar", self._on_bar)
         event_bus.subscribe("signal", self._on_signal)
         event_bus.subscribe("trade_closed", self._on_trade_closed)
+        event_bus.subscribe("trade_corrected", self._on_trade_corrected)
         event_bus.subscribe("fill", self._on_fill)
         event_bus.subscribe("status_change", self._on_status_change)
         event_bus.subscribe("error", self._on_error)
@@ -255,9 +262,14 @@ class EventBridge:
     # --- Event handlers (synchronous, called by EventBus) ---
 
     def _on_bar(self, bar: Bar) -> None:
+        from zoneinfo import ZoneInfo
+        _ET = ZoneInfo("America/New_York")
+        et = bar.timestamp.astimezone(_ET)
+        offset_seconds = int(et.utcoffset().total_seconds())
         self._enqueue("bar", {
             "instrument": bar.instrument,
             "timestamp": bar.timestamp.isoformat(),
+            "time": int(bar.timestamp.timestamp()) + offset_seconds,
             "open": bar.open,
             "high": bar.high,
             "low": bar.low,
@@ -275,6 +287,17 @@ class EventBridge:
         })
 
     def _on_trade_closed(self, trade: TradeRecord) -> None:
+        from zoneinfo import ZoneInfo
+        _ET = ZoneInfo("America/New_York")
+        # Shift entry/exit times to ET epoch for chart marker alignment
+        entry_et_epoch = None
+        exit_et_epoch = None
+        if trade.entry_time:
+            et = trade.entry_time.astimezone(_ET)
+            entry_et_epoch = int(trade.entry_time.timestamp()) + int(et.utcoffset().total_seconds())
+        if trade.exit_time:
+            et = trade.exit_time.astimezone(_ET)
+            exit_et_epoch = int(trade.exit_time.timestamp()) + int(et.utcoffset().total_seconds())
         # Use "trade" event name (matches dashboard WSMessage type)
         self._enqueue("trade", {
             "instrument": trade.instrument,
@@ -284,6 +307,35 @@ class EventBridge:
             "exit_price": trade.exit_price,
             "entry_time": trade.entry_time.isoformat(),
             "exit_time": trade.exit_time.isoformat(),
+            "entry_time_et_epoch": entry_et_epoch,
+            "exit_time_et_epoch": exit_et_epoch,
+            "pts": trade.pts,
+            "pnl": trade.pnl_dollar,
+            "exit_reason": trade.exit_reason,
+            "bars_held": trade.bars_held,
+        })
+
+    def _on_trade_corrected(self, trade: TradeRecord) -> None:
+        from zoneinfo import ZoneInfo
+        _ET = ZoneInfo("America/New_York")
+        entry_et_epoch = None
+        exit_et_epoch = None
+        if trade.entry_time:
+            et = trade.entry_time.astimezone(_ET)
+            entry_et_epoch = int(trade.entry_time.timestamp()) + int(et.utcoffset().total_seconds())
+        if trade.exit_time:
+            et = trade.exit_time.astimezone(_ET)
+            exit_et_epoch = int(trade.exit_time.timestamp()) + int(et.utcoffset().total_seconds())
+        self._enqueue("trade_update", {
+            "instrument": trade.instrument,
+            "strategy_id": trade.strategy_id,
+            "side": trade.side.upper(),
+            "entry_price": trade.entry_price,
+            "exit_price": trade.exit_price,
+            "entry_time": trade.entry_time.isoformat(),
+            "exit_time": trade.exit_time.isoformat(),
+            "entry_time_et_epoch": entry_et_epoch,
+            "exit_time_et_epoch": exit_et_epoch,
             "pts": trade.pts,
             "pnl": trade.pnl_dollar,
             "exit_reason": trade.exit_reason,
@@ -353,10 +405,24 @@ def create_app(handle: EngineHandle) -> FastAPI:
 
     @app.get("/api/trades")
     def get_trades() -> list[dict]:
-        """Get all trades from the current session (flat array)."""
+        """Get all trades from the current session (flat array).
+
+        Includes ET epoch timestamps for chart marker alignment.
+        """
+        from zoneinfo import ZoneInfo
+        _ET = ZoneInfo("America/New_York")
         trades = handle.get_trades()
-        return [
-            {
+        result = []
+        for t in trades:
+            entry_et_epoch = None
+            exit_et_epoch = None
+            if t.entry_time:
+                et = t.entry_time.astimezone(_ET)
+                entry_et_epoch = int(t.entry_time.timestamp()) + int(et.utcoffset().total_seconds())
+            if t.exit_time:
+                et = t.exit_time.astimezone(_ET)
+                exit_et_epoch = int(t.exit_time.timestamp()) + int(et.utcoffset().total_seconds())
+            result.append({
                 "instrument": t.instrument,
                 "strategy_id": t.strategy_id,
                 "side": t.side.upper(),
@@ -364,13 +430,14 @@ def create_app(handle: EngineHandle) -> FastAPI:
                 "exit_price": t.exit_price,
                 "entry_time": t.entry_time.isoformat() if t.entry_time else None,
                 "exit_time": t.exit_time.isoformat() if t.exit_time else None,
+                "entry_time_et_epoch": entry_et_epoch,
+                "exit_time_et_epoch": exit_et_epoch,
                 "pts": t.pts,
                 "pnl": t.pnl_dollar,
                 "exit_reason": t.exit_reason,
                 "bars_held": t.bars_held,
-            }
-            for t in trades
-        ]
+            })
+        return result
 
     @app.get("/api/daily_pnl")
     def get_daily_pnl() -> list[dict]:
@@ -419,9 +486,20 @@ def create_app(handle: EngineHandle) -> FastAPI:
                 bars_data[inst] = handle.get_bars(inst)
 
         # Collect trades
+        from zoneinfo import ZoneInfo
+        _ET = ZoneInfo("America/New_York")
         trades = handle.get_trades()
-        trades_data = [
-            {
+        trades_data = []
+        for t in trades:
+            entry_et_epoch = None
+            exit_et_epoch = None
+            if t.entry_time:
+                et = t.entry_time.astimezone(_ET)
+                entry_et_epoch = int(t.entry_time.timestamp()) + int(et.utcoffset().total_seconds())
+            if t.exit_time:
+                et = t.exit_time.astimezone(_ET)
+                exit_et_epoch = int(t.exit_time.timestamp()) + int(et.utcoffset().total_seconds())
+            trades_data.append({
                 "instrument": t.instrument,
                 "strategy_id": t.strategy_id,
                 "side": t.side.upper(),
@@ -429,13 +507,13 @@ def create_app(handle: EngineHandle) -> FastAPI:
                 "exit_price": t.exit_price,
                 "entry_time": t.entry_time.isoformat() if t.entry_time else None,
                 "exit_time": t.exit_time.isoformat() if t.exit_time else None,
+                "entry_time_et_epoch": entry_et_epoch,
+                "exit_time_et_epoch": exit_et_epoch,
                 "pts": t.pts,
                 "pnl": t.pnl_dollar,
                 "exit_reason": t.exit_reason,
                 "bars_held": t.bars_held,
-            }
-            for t in trades
-        ]
+            })
 
         today = datetime.utcnow().strftime("%Y-%m-%d")
         filename = f"session_{today}.json"
@@ -444,6 +522,7 @@ def create_app(handle: EngineHandle) -> FastAPI:
         session = {
             "date": today,
             "saved_at": datetime.utcnow().isoformat() + "Z",
+            "timezone": "ET",  # Bar times are ET-shifted epochs
             "bars": bars_data,
             "trades": trades_data,
         }
@@ -537,6 +616,12 @@ def create_app(handle: EngineHandle) -> FastAPI:
         ok, msg = handle.force_resume_all()
         return {"ok": ok, "message": msg}
 
+    @app.post("/api/control/strategy/{strategy_id}/close")
+    async def close_strategy_position(strategy_id: str) -> dict:
+        """Manually close a strategy's open position."""
+        ok, msg = await handle.close_strategy_position(strategy_id)
+        return {"ok": ok, "message": msg}
+
     @app.post("/api/control/kill")
     async def kill_trading() -> dict:
         """Kill switch: flatten all positions and halt."""
@@ -620,6 +705,10 @@ def create_app(handle: EngineHandle) -> FastAPI:
                     elif command == "force_resume":
                         ok, reason = handle.force_resume_all()
                         await ws.send_text(json.dumps({"ack": "force_resumed" if ok else "error", "message": reason}))
+                    elif command == "strategy_close":
+                        sid = msg.get("strategy_id", "")
+                        ok, reason = await handle.close_strategy_position(sid)
+                        await ws.send_text(json.dumps({"ack": "strategy_closed" if ok else "error", "message": reason}))
                     else:
                         await ws.send_text(json.dumps({"error": f"unknown command: {command}"}))
                 except json.JSONDecodeError:

@@ -110,6 +110,18 @@ export function useWebSocket(url: string): UseWebSocketReturn {
             break;
           }
 
+          case 'trade_update': {
+            const updated = message.data as unknown as Trade;
+            setTrades((prev) =>
+              prev.map((t) =>
+                t.entry_time === updated.entry_time && t.strategy_id === updated.strategy_id
+                  ? updated
+                  : t
+              )
+            );
+            break;
+          }
+
           case 'signal': {
             const sig: SignalEvent = {
               type: (message.data.type as string) || '',
@@ -126,9 +138,10 @@ export function useWebSocket(url: string): UseWebSocketReturn {
           case 'bar': {
             const d = message.data;
             const inst = d.instrument as string;
-            const time = Math.floor(
-              new Date(d.timestamp as string).getTime() / 1000
-            );
+            // Use server's ET epoch (d.time) if available, else fallback to parsing timestamp
+            const time = (typeof d.time === 'number' && (d.time as number) > 0)
+              ? Math.floor((d.time as number) / 60) * 60  // snap to minute
+              : Math.floor(new Date(d.timestamp as string).getTime() / 1000);
             const newBar: BarData = {
               time,
               open: d.open as number,

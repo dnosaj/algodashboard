@@ -1,9 +1,11 @@
-import type { SafetyStatusData } from '../types';
+import { useState, useRef, useEffect } from 'react';
+import type { SafetyStatusData, Position } from '../types';
 
 const FONT = "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace";
 
 interface SafetyPanelProps {
   safety: SafetyStatusData;
+  positions: Position[];
   sendCommand: (command: string, payload?: Record<string, unknown>) => void;
 }
 
@@ -41,9 +43,34 @@ function PausedBadge({ paused }: { paused: boolean }) {
   );
 }
 
-export function SafetyPanel({ safety, sendCommand }: SafetyPanelProps) {
+export function SafetyPanel({ safety, positions, sendCommand }: SafetyPanelProps) {
   const strategies = Object.values(safety.strategies || {});
   const isHaltedOrPaused = safety.halted || safety.extended_pause;
+  const [closingStrategy, setClosingStrategy] = useState<string | null>(null);
+  const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (closeTimerRef.current) {
+        clearTimeout(closeTimerRef.current);
+      }
+    };
+  }, []);
+
+  const getPositionSide = (strategyId: string): string => {
+    const pos = positions.find((p) => p.strategy_id === strategyId);
+    return pos?.side || 'FLAT';
+  };
+
+  const handleClose = (strategyId: string) => {
+    setClosingStrategy(strategyId);
+    sendCommand('strategy_close', { strategy_id: strategyId });
+    // Re-enable after 3s (status update will confirm FLAT sooner)
+    if (closeTimerRef.current) {
+      clearTimeout(closeTimerRef.current);
+    }
+    closeTimerRef.current = setTimeout(() => setClosingStrategy(null), 3000);
+  };
 
   return (
     <div style={{
@@ -187,6 +214,25 @@ export function SafetyPanel({ safety, sendCommand }: SafetyPanelProps) {
             }}>
               {s.daily_pnl >= 0 ? '+' : ''}${s.daily_pnl.toFixed(2)}
             </span>
+
+            {/* EXIT button — visible only when position is non-FLAT */}
+            {getPositionSide(s.strategy_id) !== 'FLAT' && (
+              <button
+                onClick={() => handleClose(s.strategy_id)}
+                disabled={closingStrategy === s.strategy_id}
+                style={{
+                  fontSize: 10, fontFamily: FONT, fontWeight: 700,
+                  padding: '3px 10px', borderRadius: 3,
+                  border: '1px solid #ff444466', cursor: 'pointer',
+                  backgroundColor: closingStrategy === s.strategy_id
+                    ? 'rgba(255,68,68,0.05)' : 'rgba(255,68,68,0.15)',
+                  color: closingStrategy === s.strategy_id ? '#ff444466' : '#ff4444',
+                  marginLeft: 'auto',
+                }}
+              >
+                {closingStrategy === s.strategy_id ? 'CLOSING...' : 'EXIT'}
+              </button>
+            )}
           </div>
         ))}
       </div>

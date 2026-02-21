@@ -30,6 +30,8 @@ export interface Trade {
   exit_price: number;
   entry_time: string;
   exit_time: string;
+  entry_time_et_epoch?: number;
+  exit_time_et_epoch?: number;
   pts: number;
   pnl: number;
   exit_reason: string;
@@ -78,7 +80,7 @@ export interface SignalEvent {
 }
 
 export interface WSMessage {
-  type: 'bar' | 'signal' | 'trade' | 'status' | 'safety_status' | 'fill' | 'error';
+  type: 'bar' | 'signal' | 'trade' | 'trade_update' | 'status' | 'safety_status' | 'fill' | 'error';
   data: Record<string, unknown>;
   ts: string;
 }
@@ -94,6 +96,7 @@ export interface SessionInfo {
 export interface SessionData {
   date: string;
   saved_at: string;
+  timezone?: string;  // "ET" for new sessions, absent for old UTC sessions
   bars: Record<string, BarData[]>;
   trades: Trade[];
 }

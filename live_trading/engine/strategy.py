@@ -12,6 +12,7 @@ VALIDATION: Feed Databento CSV bar-by-bar into IncrementalStrategy and
 compare output trades against run_backtest_v10(). Must be IDENTICAL.
 """
 
+import asyncio
 import logging
 from collections import deque
 from dataclasses import dataclass, field
@@ -432,6 +433,12 @@ class IncrementalStrategy:
         # Previous bar data (for stop loss checking bar i-1 close)
         self._prev_bar: Optional[Bar] = None
 
+        # Per-strategy lock serializes: monitor exit, bar-close exit, manual exit
+        self.trade_lock = asyncio.Lock()
+
+        # When True, intra-bar monitor owns TP/trail/SL exits; on_bar() skips them
+        self.intrabar_monitor_active: bool = False
+
     @property
     def strategy_id(self) -> str:
         return self.config.strategy_id or self.config.instrument
@@ -530,7 +537,8 @@ class IncrementalStrategy:
             return signal
 
         # --- Exits for open positions ---
-        if self.state.position != 0:
+        # TP, trail, SL checks — skip if intra-bar monitor handles these
+        if self.state.position != 0 and not self.intrabar_monitor_active:
             # Max loss stop (both modes): check bar[i-1] close, fill at bar[i] open
             if self.config.max_loss_pts > 0 and prev_bar is not None:
                 if self.state.position == 1 and prev_bar.close <= self.state.entry_price - self.config.max_loss_pts:
@@ -542,7 +550,7 @@ class IncrementalStrategy:
                     self._update_prev(sm_now, bar)
                     return signal
 
-        if self.config.exit_mode == "tp_scalp" and self.state.position != 0:
+        if self.config.exit_mode == "tp_scalp" and self.state.position != 0 and not self.intrabar_monitor_active:
             # TP/trail exits: use prev bar close (no look-ahead)
             if prev_bar is not None:
                 if self.state.position == 1:
@@ -571,6 +579,7 @@ class IncrementalStrategy:
                         self._update_prev(sm_now, bar)
                         return signal
 
+        # SM flip exit — ALWAYS bar-close (not handled by monitor)
         elif self.config.exit_mode == "sm_flip" and self.state.position != 0:
             # SM flip exits (original v11 logic)
             if self.state.position == 1:

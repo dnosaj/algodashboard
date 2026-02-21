@@ -95,6 +95,7 @@ class EventBus:
                           Advisors can modify qty or set skip=True.
         "fill"          - Order filled. Payload: dict(side, price, qty, order_id)
         "trade_closed"  - Trade completed. Payload: TradeRecord
+        "trade_corrected" - Trade patched with actual fill price. Payload: TradeRecord
         "daily_summary" - End of day stats. Payload: dict(trades, pnl, win_rate)
         "error"         - Error occurred. Payload: dict(msg, severity)
         "status_change" - Engine status changed. Payload: dict(status, reason)
