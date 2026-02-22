@@ -7,24 +7,26 @@ and position tracking via the tastytrade REST API + AlertStreamer.
 Order Type Specifications by Strategy
 --------------------------------------
 
-MNQ v11 (max_loss_pts=50):
+Strategies with TP + SL (vScalpA, vScalpB, MES v2):
   ENTRY:  Market order (BUY or SELL) -> immediate fill on CME
-  STOP:   Resting STOP order at entry_price +/- 50 pts
-          Executes on CME exchange instantly when price hits level
-  EXIT:   Cancel resting STOP -> Market close (SM flip or EOD)
-  STOP HIT: Exchange fills STOP, AlertStreamer notifies engine,
-            strategy state updated via force_close()
+  BRACKET: OCO pair: resting LIMIT (TP) + STOP (SL) on exchange
+           When one fills, exchange auto-cancels the other
+  EXIT:   Cancel OCO -> Market close (EOD or manual)
+  FILL:   AlertStreamer detects fill, price proximity determines TP vs SL
 
-MES v9.4 (max_loss_pts=0):
-  ENTRY:  Market order (BUY or SELL) -> immediate fill on CME
-  STOP:   None (no resting order placed)
+Strategies with SL only (no TP configured):
+  ENTRY:  Market order -> immediate fill on CME
+  STOP:   Resting STOP order at entry_price +/- max_loss_pts
+  EXIT:   Cancel STOP -> Market close (SM flip or EOD)
+
+Strategies with no SL (max_loss_pts=0):
+  ENTRY:  Market order -> immediate fill on CME
   EXIT:   Market close (SM flip or EOD)
 
 Why resting orders matter:
-  - The backtest checks stop loss at bar boundaries (every 60s poll)
-  - A resting STOP order fires intra-bar the instant price touches it
-  - This is BETTER than the backtest -- no 60s delay on stop exits
-  - No take-profit in current strategies; if added later, use OCO bracket
+  - Resting orders fire intra-bar the instant price touches the level
+  - No polling delay (60s bar boundary) on stop/TP exits
+  - OCO brackets survive engine crashes -- both legs remain on exchange
 
 Contract symbols:
   - MNQ/MES use quarterly contracts: H(Mar), M(Jun), U(Sep), Z(Dec)
@@ -89,6 +91,7 @@ class BracketState:
     order_id: Optional[int] = None      # tastytrade order ID (simple stop)
     complex_order_id: Optional[int] = None  # tastytrade complex order ID (OCO)
     is_oco: bool = False                # True if OCO (TP + SL), False if simple stop
+    tp_price: float = 0.0              # TP limit price (OCO only)
     filled: bool = False
     fill_price: float = 0.0
 
@@ -150,6 +153,9 @@ class TastytradeBroker:
 
         # Background tasks
         self._alert_task: Optional[asyncio.Task] = None
+
+        # Strategies where OCO placement failed (fallback to simple stop)
+        self._oco_failed_sids: set = set()
 
         # Order counter for local IDs
         self._order_count = 0
@@ -262,11 +268,11 @@ class TastytradeBroker:
         """Place a market entry order.
 
         After the entry fills, automatically places:
-          - SL-only STOP if max_loss_pts > 0 (V11, V15)
-          - Nothing otherwise (MES V9.4)
+          - OCO bracket (TP LIMIT + SL STOP) if tp_pts > 0 and max_loss_pts > 0
+          - SL-only STOP if max_loss_pts > 0 but no TP
+          - Nothing if max_loss_pts == 0
 
-        TP is handled by IntraBarExitMonitor on real-time quotes, not
-        by exchange brackets, to support trailing stop logic.
+        Falls back to simple stop if OCO placement fails.
 
         Args:
             instrument: "MNQ" or "MES"
@@ -320,11 +326,29 @@ class TastytradeBroker:
         # Auto-place bracket/stop based on strategy config
         strat = self._strategy_configs.get(sid)
         if strat and strat.max_loss_pts > 0:
-            # Simple stop only
-            await self._place_stop(
-                instrument, norm_side, qty, fill_price, strat.max_loss_pts,
-                strategy_id=sid,
-            )
+            if strat.tp_pts > 0:
+                # OCO bracket: resting LIMIT (TP) + STOP (SL) on exchange
+                try:
+                    await self.place_oco_bracket(
+                        instrument, norm_side, qty, fill_price,
+                        strat.max_loss_pts, strat.tp_pts, strategy_id=sid,
+                    )
+                except Exception as e:
+                    self._oco_failed_sids.add(sid)
+                    logger.critical(
+                        f"[TT] OCO bracket FAILED for {sid}: {e} — "
+                        f"falling back to simple stop"
+                    )
+                    await self._place_stop(
+                        instrument, norm_side, qty, fill_price,
+                        strat.max_loss_pts, strategy_id=sid,
+                    )
+            else:
+                # SL-only stop (no TP configured)
+                await self._place_stop(
+                    instrument, norm_side, qty, fill_price,
+                    strat.max_loss_pts, strategy_id=sid,
+                )
 
         logger.info(
             f"[TT] FILLED {order_id}: {norm_side.upper()} {qty}x {instrument} "
@@ -553,6 +577,7 @@ class TastytradeBroker:
             stop_price=stop_price,
             complex_order_id=response.order.id if response.order else None,
             is_oco=True,
+            tp_price=tp_price,
         )
         self._brackets[sid] = bracket
 
@@ -744,22 +769,41 @@ class TastytradeBroker:
                 bracket.filled = True
                 bracket.fill_price = fill_price
 
+                # Determine fill type: TP or SL based on price proximity
+                if bracket.is_oco and bracket.tp_price != 0:
+                    tp_dist = abs(fill_price - bracket.tp_price)
+                    sl_dist = abs(fill_price - bracket.stop_price)
+                    fill_type = "take_profit" if tp_dist <= sl_dist else "stop_loss"
+                else:
+                    fill_type = "stop_loss"
+
                 # Pop position immediately so close_position() is a no-op
                 self._positions.pop(sid, None)
 
                 await self._bracket_fill_queue.put({
                     "instrument": bracket.instrument,
                     "strategy_id": sid,
-                    "type": "stop_loss",
+                    "type": fill_type,
                     "price": fill_price,
                     "side": bracket.side,
                 })
 
                 logger.info(
-                    f"[TT] STOP TRIGGERED: {sid} ({bracket.instrument}) "
+                    f"[TT] {'TP' if fill_type == 'take_profit' else 'SL'} TRIGGERED: "
+                    f"{sid} ({bracket.instrument}) "
                     f"@ {fill_price:.2f} (was {bracket.side})"
                 )
                 return
+
+        # No bracket matched -- warn if OCO brackets are active
+        active_oco = [s for s, b in self._brackets.items()
+                      if b.is_oco and not b.filled]
+        if active_oco:
+            logger.warning(
+                f"[TT] Unmatched fill (order {order.id}, "
+                f"complex_oid={getattr(order, 'complex_order_id', None)}) "
+                f"while OCO brackets active: {active_oco}"
+            )
 
     @staticmethod
     def _extract_fill_price(order: PlacedOrder) -> float:
@@ -855,3 +899,9 @@ class TastytradeBroker:
     def get_contract_symbols(self) -> dict[str, str]:
         """Return resolved contract symbols: {'MNQ': '/MNQH6', ...}"""
         return dict(self._contract_symbols)
+
+    def pop_oco_failures(self) -> set:
+        """Return and clear the set of strategy IDs where OCO placement failed."""
+        failed = self._oco_failed_sids.copy()
+        self._oco_failed_sids.clear()
+        return failed

@@ -1,5 +1,5 @@
 """
-Intra-bar exit monitor for real-time TP/trail exits on quote ticks.
+Intra-bar exit monitor for real-time TP/SL/trail exits on quote ticks.
 
 Monitors real-time bid/ask quotes and triggers exits between bar boundaries.
 Only active for strategies with intra-bar exit types (tp_pts > 0).
@@ -26,16 +26,19 @@ logger = logging.getLogger(__name__)
 class IntraBarExitMonitor:
     """Monitors real-time quotes for intra-bar TP/trail exits."""
 
-    def __init__(self, strategies, order_manager, event_bus, safety_manager):
+    def __init__(self, strategies, order_manager, event_bus, safety_manager,
+                 exclude_sids=None):
         self._strategies = strategies
         self._order_manager = order_manager
         self._event_bus = event_bus
         self._safety = safety_manager
 
-        # Only monitor strategies with intra-bar exits
+        # Only monitor strategies with intra-bar exits, excluding OCO-bracketed ones
+        exclude = exclude_sids or set()
         self._monitored: dict = {
             sid: s for sid, s in strategies.items()
-            if s.config.tp_pts > 0 or s.config.exit_mode == "tp_scalp"
+            if (s.config.tp_pts > 0 or s.config.exit_mode == "tp_scalp")
+            and sid not in exclude
         }
 
         if self._monitored:
@@ -82,12 +85,15 @@ class IntraBarExitMonitor:
                             self._event_bus.emit("error", {"msg": f"Intra-bar exit failed for {sid}: {e}", "severity": "CRITICAL"})
 
     def _check_exit(self, strat, unrealized) -> Optional[ExitReason]:
-        """Check if unrealized P&L triggers a TP or trail exit.
+        """Check if unrealized P&L triggers a TP, SL, or trail exit.
 
         Updates MFE BEFORE checking trail (order matters: MFE must be
         current before computing trail level).
 
-        NOTE: SL is NOT checked here — exchange resting STOP handles SL.
+        NOTE: SL IS checked here for paper mode (no exchange stop).
+              In live mode with OCO brackets, strategies are excluded
+              from this monitor entirely, so this SL check only fires
+              in paper mode or OCO-fallback scenarios.
         NOTE: SM flip is NOT checked here — bar-close indicator only.
         """
         # Update MFE before checking trail
@@ -100,6 +106,10 @@ class IntraBarExitMonitor:
         # TP check
         if strat.config.tp_pts > 0 and unrealized >= strat.config.tp_pts:
             return ExitReason.TAKE_PROFIT
+
+        # SL check (paper mode -- live mode has exchange resting STOP)
+        if strat.config.max_loss_pts > 0 and unrealized <= -strat.config.max_loss_pts:
+            return ExitReason.STOP_LOSS
 
         # Trail check (only tp_scalp mode with trail activated)
         if strat.state.trail_activated:

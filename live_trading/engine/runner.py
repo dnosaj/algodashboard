@@ -288,10 +288,13 @@ async def process_bar(
                 low=fill_price, close=fill_price,
                 volume=0, instrument=bar.instrument,
             )
-            strategy.force_close(synthetic_bar, ExitReason.STOP_LOSS)
+            exit_reason = (ExitReason.TAKE_PROFIT
+                           if fill_info.get("type") == "take_profit"
+                           else ExitReason.STOP_LOSS)
+            strategy.force_close(synthetic_bar, exit_reason)
             logger.info(
-                f"[Runner] Resting stop triggered for {sid} "
-                f"@ {fill_price:.2f}"
+                f"[Runner] Resting bracket triggered for {sid} "
+                f"@ {fill_price:.2f} ({exit_reason.value})"
             )
             # Still run on_bar so indicators stay current, but the strategy
             # will see position=0 and just update SM/RSI state
@@ -366,6 +369,16 @@ async def process_bar(
                 "strategy_id": sid,
             })
 
+            # If OCO bracket failed for this entry, re-enable bar-close TP/SL
+            if hasattr(state.order_manager, 'pop_oco_failures'):
+                for failed_sid in state.order_manager.pop_oco_failures():
+                    if failed_sid in state.strategies:
+                        state.strategies[failed_sid].intrabar_monitor_active = False
+                        logger.warning(
+                            f"[Runner] OCO bracket failed for {failed_sid}, "
+                            f"bar-close TP/SL re-enabled"
+                        )
+
     # Close signals (strategy already recorded the trade internally)
     elif sig.type in (SignalType.CLOSE_LONG, SignalType.CLOSE_SHORT):
         if state.order_manager:
@@ -431,7 +444,10 @@ async def bar_processing_loop(state: EngineState) -> None:
                 state.intrabar_monitor_active = False
                 for s in state.strategies.values():
                     if hasattr(s, 'intrabar_monitor_active'):
-                        s.intrabar_monitor_active = False
+                        # Don't disable for OCO strategies -- exchange handles their exits
+                        if not (hasattr(state.order_manager, 'place_oco_bracket')
+                                and s.config.tp_pts > 0 and s.config.max_loss_pts > 0):
+                            s.intrabar_monitor_active = False
 
 
 async def intra_bar_exit_loop(state: EngineState) -> None:
@@ -442,16 +458,32 @@ async def intra_bar_exit_loop(state: EngineState) -> None:
     """
     logger.info("[Runner] Intra-bar exit monitor loop started")
 
+    # Only exclude from monitor when using real broker (OCO brackets placed)
+    oco_sids = set()
+    if hasattr(state.order_manager, 'place_oco_bracket'):
+        oco_sids = {
+            sid for sid, s in state.strategies.items()
+            if s.config.tp_pts > 0 and s.config.max_loss_pts > 0
+        }
+
     monitor = IntraBarExitMonitor(
         state.strategies, state.order_manager,
         state.event_bus, state.safety,
+        exclude_sids=oco_sids,
     )
 
     # Activate the intrabar_monitor_active flag on monitored strategies
     for sid in monitor._monitored:
         state.strategies[sid].intrabar_monitor_active = True
         logger.info(f"[Runner] Intra-bar monitoring active for {sid}")
-    state.intrabar_monitor_active = bool(monitor._monitored)
+
+    # OCO-bracketed strategies: skip on_bar() TP/SL checks (exchange handles them)
+    for sid in oco_sids:
+        if sid in state.strategies:
+            state.strategies[sid].intrabar_monitor_active = True
+            logger.info(f"[Runner] OCO bracket active for {sid}, bar-close TP/SL skipped")
+
+    state.intrabar_monitor_active = bool(monitor._monitored) or bool(oco_sids)
 
     while not state.shutdown_event.is_set():
         try:
