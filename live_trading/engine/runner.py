@@ -369,7 +369,26 @@ async def process_bar(
                 "strategy_id": sid,
             })
 
-            # If OCO bracket failed for this entry, re-enable bar-close TP/SL
+            # If ALL protection failed (OCO + fallback stop), halt the engine
+            if hasattr(state.order_manager, 'pop_protection_failures'):
+                for failed_sid in state.order_manager.pop_protection_failures():
+                    if state.safety:
+                        state.safety._halted = True
+                        state.safety._halt_reason = (
+                            f"Broker protection failed for {failed_sid}: "
+                            f"both OCO bracket and fallback stop rejected. "
+                            f"Position has NO exchange protection."
+                        )
+                        logger.critical(
+                            f"[Runner] ENGINE HALTED: broker cannot place "
+                            f"protective orders for {failed_sid}"
+                        )
+                        state.event_bus.emit("error", {
+                            "msg": f"Engine halted: broker protection failed for {failed_sid}",
+                            "severity": "CRITICAL",
+                        })
+
+            # If OCO bracket failed (but stop succeeded), re-enable bar-close TP/SL
             if hasattr(state.order_manager, 'pop_oco_failures'):
                 for failed_sid in state.order_manager.pop_oco_failures():
                     if failed_sid in state.strategies:

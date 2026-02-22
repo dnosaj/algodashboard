@@ -157,6 +157,9 @@ class TastytradeBroker:
         # Strategies where OCO placement failed (fallback to simple stop)
         self._oco_failed_sids: set = set()
 
+        # Strategies where ALL protection failed (OCO + fallback stop both failed)
+        self._protection_failed_sids: set = set()
+
         # Order counter for local IDs
         self._order_count = 0
 
@@ -334,21 +337,35 @@ class TastytradeBroker:
                         strat.max_loss_pts, strat.tp_pts, strategy_id=sid,
                     )
                 except Exception as e:
-                    self._oco_failed_sids.add(sid)
                     logger.critical(
                         f"[TT] OCO bracket FAILED for {sid}: {e} — "
                         f"falling back to simple stop"
                     )
+                    try:
+                        await self._place_stop(
+                            instrument, norm_side, qty, fill_price,
+                            strat.max_loss_pts, strategy_id=sid,
+                        )
+                        self._oco_failed_sids.add(sid)
+                    except Exception as e2:
+                        self._protection_failed_sids.add(sid)
+                        logger.critical(
+                            f"[TT] BOTH OCO and fallback stop FAILED for {sid}: {e2} — "
+                            f"position has NO exchange protection, engine should halt"
+                        )
+            else:
+                # SL-only stop (no TP configured)
+                try:
                     await self._place_stop(
                         instrument, norm_side, qty, fill_price,
                         strat.max_loss_pts, strategy_id=sid,
                     )
-            else:
-                # SL-only stop (no TP configured)
-                await self._place_stop(
-                    instrument, norm_side, qty, fill_price,
-                    strat.max_loss_pts, strategy_id=sid,
-                )
+                except Exception as e:
+                    self._protection_failed_sids.add(sid)
+                    logger.critical(
+                        f"[TT] SL-only stop FAILED for {sid}: {e} — "
+                        f"position has NO exchange protection, engine should halt"
+                    )
 
         logger.info(
             f"[TT] FILLED {order_id}: {norm_side.upper()} {qty}x {instrument} "
@@ -904,4 +921,10 @@ class TastytradeBroker:
         """Return and clear the set of strategy IDs where OCO placement failed."""
         failed = self._oco_failed_sids.copy()
         self._oco_failed_sids.clear()
+        return failed
+
+    def pop_protection_failures(self) -> set:
+        """Return and clear strategy IDs where ALL protection failed (OCO + stop)."""
+        failed = self._protection_failed_sids.copy()
+        self._protection_failed_sids.clear()
         return failed
