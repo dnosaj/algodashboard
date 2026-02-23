@@ -26,6 +26,9 @@ backtesting_engine/data/
 # Session replay files (regenerate with generate_session.py)
 live_trading/sessions/*.json
 
+# Backtest result CSVs (regenerate with run_and_save_portfolio.py)
+backtesting_engine/results/*.csv
+
 # Logs
 live_trading/logs/
 *.log
