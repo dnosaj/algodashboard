@@ -251,13 +251,13 @@ export function SafetyPanel({ safety, positions, sendCommand }: SafetyPanelProps
               />
             )}
 
-            {/* SL today */}
+            {/* SL today + rolling 5d */}
             <span style={{
               fontSize: 10, fontFamily: FONT,
               color: s.sl_count_today > 0 ? '#ff4444' : '#555',
-              minWidth: 50,
+              minWidth: 150,
             }}>
-              SL: {s.sl_count_today}
+              SL: {s.sl_count_today} today | {s.sl_rolling_5d ?? 0} (5d)
             </span>
 
             {/* Daily P&L */}

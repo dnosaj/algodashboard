@@ -78,6 +78,12 @@ class SafetyManager:
         # Appended on daily reset (before clearing daily counters)
         self._daily_sl_history: list[dict] = []
 
+        # Per-strategy rolling 5-day SL history: keyed by strategy_id
+        # Each value is a list of the last 5 daily SL counts
+        self._per_strategy_sl_history: dict[str, list[int]] = {
+            (s.strategy_id or s.instrument): [] for s in config.strategies
+        }
+
     # ------------------------------------------------------------------
     # Event bus handlers (registered externally)
     # ------------------------------------------------------------------
@@ -108,6 +114,20 @@ class SafetyManager:
             # Only count actual stop-loss exits toward SL counters
             if trade.exit_reason == "SL":
                 strat.sl_count_today += 1
+
+            # Per-strategy daily loss limit (auto-pause)
+            strat_max_loss = strat_config.max_strategy_daily_loss if strat_config else 0.0
+            if (strat_max_loss > 0 and strat.daily_pnl <= -strat_max_loss
+                    and not strat.paused and not strat.manual_override):
+                strat.paused = True
+                strat.pause_reason = (
+                    f"Auto: daily loss ${abs(strat.daily_pnl):.2f} "
+                    f"exceeds limit ${strat_max_loss:.2f}"
+                )
+                logger.warning(
+                    f"[Safety] Strategy {sid} auto-paused: daily loss "
+                    f"${abs(strat.daily_pnl):.2f} exceeds limit ${strat_max_loss:.2f}"
+                )
 
         # Global tracking
         self._global_daily_pnl += adjusted_pnl
@@ -353,6 +373,13 @@ class SafetyManager:
         })
         self._daily_sl_history = self._daily_sl_history[-5:]
 
+        # 2b. Append each strategy's SL count to per-strategy history, then trim
+        for sid, strat in self._strategies.items():
+            if sid not in self._per_strategy_sl_history:
+                self._per_strategy_sl_history[sid] = []
+            self._per_strategy_sl_history[sid].append(strat.sl_count_today)
+            self._per_strategy_sl_history[sid] = self._per_strategy_sl_history[sid][-5:]
+
         # 3. Auto-clear extended pause if rolling dropped below 4
         if self._extended_pause and rolling < 4:
             self._extended_pause = False
@@ -423,6 +450,9 @@ class SafetyManager:
         strategies = {}
         for sid, strat in self._strategies.items():
             strat_config = self._strategy_configs.get(sid)
+            # Per-strategy rolling 5-day SL: last 4 days of history + today
+            hist = self._per_strategy_sl_history.get(sid, [])
+            sl_rolling_5d = sum(hist[-4:]) + strat.sl_count_today
             strategies[sid] = {
                 "strategy_id": strat.strategy_id,
                 "instrument": strat.instrument,
@@ -435,6 +465,7 @@ class SafetyManager:
                 "config_partial_qty": strat_config.partial_qty if strat_config else 1,
                 "config_partial_tp_pts": strat_config.partial_tp_pts if strat_config else 0,
                 "sl_count_today": strat.sl_count_today,
+                "sl_rolling_5d": sl_rolling_5d,
                 "trade_count_today": strat.trade_count_today,
                 "daily_pnl": round(strat.daily_pnl, 2),
             }

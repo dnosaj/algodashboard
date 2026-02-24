@@ -29,6 +29,9 @@ live_trading/sessions/*.json
 # Backtest result CSVs (regenerate with run_and_save_portfolio.py)
 backtesting_engine/results/*.csv
 
+# Live mode flag (local to machine)
+live_trading/.live
+
 # Logs
 live_trading/logs/
 *.log

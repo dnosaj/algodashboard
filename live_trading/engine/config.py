@@ -33,6 +33,7 @@ class StrategyConfig:
     entry_qty: int = 1                  # Default entry size (contracts)
     partial_tp_pts: int = 0              # Partial TP target in pts (0 = disabled)
     partial_qty: int = 1                 # Contracts to close at partial TP
+    max_strategy_daily_loss: float = 0.0  # Max daily loss per strategy (0 = disabled)
     session_start_et: str = "10:00"   # RTH start (Eastern Time)
     session_end_et: str = "15:45"     # Last entry allowed
     session_close_et: str = "16:00"   # Force close all positions
@@ -42,7 +43,7 @@ class StrategyConfig:
 class SafetyConfig:
     """Safety limits and circuit breakers."""
     max_daily_loss: float = 500.0     # Max daily loss in dollars before halt
-    max_position_size: int = 100      # Max contracts per instrument (raise for live)
+    max_position_size: int = 5        # Max contracts per instrument
     max_consecutive_losses: int = 5   # Consecutive losses before pause
     heartbeat_timeout_sec: int = 90   # Alert if no data for this long (polls every 60s)
     flatten_timeout_sec: int = 300   # Flatten all if no data for this long
@@ -127,6 +128,7 @@ MNQ_V15 = StrategyConfig(
     rsi_len=8, rsi_buy=60, rsi_sell=40,
     cooldown=20, max_loss_pts=50,
     dollar_per_pt=2.0,
+    max_strategy_daily_loss=100.0,
 )
 
 MNQ_VSCALPB = StrategyConfig(
@@ -141,6 +143,7 @@ MNQ_VSCALPB = StrategyConfig(
     rsi_len=8, rsi_buy=55, rsi_sell=45,  # Tighter bands than vScalpA
     cooldown=20, max_loss_pts=15,  # Tight stop: wrong fast = out fast
     dollar_per_pt=2.0,
+    max_strategy_daily_loss=100.0,
 )
 
 # MES v9.4 -- REPLACED by MES_V2 (TP=20 exit). Kept for reference.
@@ -171,6 +174,7 @@ MES_V2 = StrategyConfig(
     entry_qty=2,           # 2 contracts: partial at TP1, runner to TP2
     partial_tp_pts=10,     # TP1: close 1 contract at +10 pts ($50)
     partial_qty=1,         # Close 1 of 2 at TP1
+    max_strategy_daily_loss=200.0,
     session_close_et="15:30",  # EOD 15:30 ET validated for MES
 )
 

@@ -117,6 +117,7 @@ export interface SafetyStrategyStatus {
   config_partial_qty: number;
   config_partial_tp_pts: number;
   sl_count_today: number;
+  sl_rolling_5d: number;
   trade_count_today: number;
   daily_pnl: number;
 }
