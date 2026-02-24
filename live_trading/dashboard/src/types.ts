@@ -4,6 +4,8 @@ export interface Position {
   side: 'FLAT' | 'LONG' | 'SHORT';
   entry_price: number | null;
   unrealized_pnl: number;
+  qty?: number;
+  partial_filled?: boolean;
 }
 
 export interface InstrumentData {
@@ -27,17 +29,19 @@ export interface Trade {
   strategy_id?: string;
   side: 'LONG' | 'SHORT';
   entry_price: number;
-  exit_price: number;
+  exit_price?: number | null;
   entry_time: string;
-  exit_time: string;
+  exit_time?: string | null;
   entry_time_et_epoch?: number;
   exit_time_et_epoch?: number;
-  pts: number;
-  pnl: number;
-  exit_reason: string;
+  pts?: number;
+  pnl?: number;
+  exit_reason?: string;
   bars_held: number;
   mfe?: number;
   mae?: number;
+  qty?: number;
+  is_partial?: boolean;
 }
 
 export interface BarData {
@@ -108,6 +112,10 @@ export interface SafetyStrategyStatus {
   pause_reason: string;
   manual_override: boolean;
   qty_override: number | null;
+  partial_qty_override: number | null;
+  config_entry_qty: number;
+  config_partial_qty: number;
+  config_partial_tp_pts: number;
   sl_count_today: number;
   trade_count_today: number;
   daily_pnl: number;

@@ -173,7 +173,7 @@ function formatPts(value: number | null): string {
 }
 
 export function TradeLog({ trades }: TradeLogProps) {
-  const closedTrades = trades;
+  const closedTrades = trades.filter((t) => t.exit_time);
   const totalPnl = closedTrades.reduce((sum, t) => sum + (t.pnl || 0), 0);
   const winners = closedTrades.filter((t) => (t.pnl || 0) > 0).length;
   const losers = closedTrades.filter((t) => (t.pnl || 0) < 0).length;
@@ -190,8 +190,8 @@ export function TradeLog({ trades }: TradeLogProps) {
   }
 
   // Sort trades: most recent first
-  const sortedTrades = [...trades].sort(
-    (a, b) => new Date(b.exit_time).getTime() - new Date(a.exit_time).getTime()
+  const sortedTrades = [...closedTrades].sort(
+    (a, b) => new Date(b.exit_time!).getTime() - new Date(a.exit_time!).getTime()
   );
 
   return (
@@ -199,7 +199,7 @@ export function TradeLog({ trades }: TradeLogProps) {
       <div style={styles.header}>
         <h3 style={styles.title}>Trade Log</h3>
         <span style={styles.summary}>
-          {trades.length} trades today
+          {closedTrades.length} trades today
         </span>
       </div>
 
@@ -213,6 +213,7 @@ export function TradeLog({ trades }: TradeLogProps) {
                 <th style={styles.th}>Time</th>
                 <th style={styles.th}>Strategy</th>
                 <th style={styles.th}>Side</th>
+                <th style={{ ...styles.th, ...styles.thRight }}>Qty</th>
                 <th style={{ ...styles.th, ...styles.thRight }}>Entry</th>
                 <th style={{ ...styles.th, ...styles.thRight }}>Exit</th>
                 <th style={{ ...styles.th, ...styles.thRight }}>Pts</th>
@@ -222,7 +223,10 @@ export function TradeLog({ trades }: TradeLogProps) {
             </thead>
             <tbody>
               {sortedTrades.map((trade) => (
-                <tr key={trade.entry_time + (trade.strategy_id || trade.instrument)} style={styles.row(trade.pnl)}>
+                <tr
+                  key={trade.entry_time + (trade.strategy_id || trade.instrument) + (trade.is_partial ? '-partial' : '')}
+                  style={styles.row(trade.pnl)}
+                >
                   <td style={styles.td}>{formatTime(trade.exit_time)}</td>
                   <td style={{ ...styles.td, color: '#8888cc', fontSize: 10 }}>
                     {trade.strategy_id || trade.instrument}
@@ -231,6 +235,9 @@ export function TradeLog({ trades }: TradeLogProps) {
                     <span style={styles.sideBadge(trade.side)}>
                       {trade.side}
                     </span>
+                  </td>
+                  <td style={{ ...styles.td, ...styles.tdRight, color: '#aaa' }}>
+                    {trade.qty ?? 1}
                   </td>
                   <td style={{ ...styles.td, ...styles.tdRight, color: '#ccc' }}>
                     {formatPrice(trade.entry_price)}
@@ -258,6 +265,15 @@ export function TradeLog({ trades }: TradeLogProps) {
                   </td>
                   <td style={{ ...styles.td, color: '#666', fontSize: 10 }}>
                     {trade.exit_reason || '--'}
+                    {trade.is_partial && (
+                      <span style={{
+                        marginLeft: 4, fontSize: 9, color: '#ffaa00',
+                        padding: '1px 3px', borderRadius: 2,
+                        backgroundColor: 'rgba(255,170,0,0.12)',
+                      }}>
+                        TP1
+                      </span>
+                    )}
                   </td>
                 </tr>
               ))}

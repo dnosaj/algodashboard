@@ -177,6 +177,40 @@ class MockOrderManager:
         )
         return fill
 
+    async def partial_close_position(
+        self, instrument: str, qty: int, price_hint: float,
+        strategy_id: str = "",
+    ) -> Optional[MockFill]:
+        """Close part of an open position (partial TP1)."""
+        sid = strategy_id or instrument
+        pos = self._positions.get(sid)
+        if pos is None:
+            logger.warning(f"[MockOrderManager] No position to partial-close for {sid}")
+            return None
+
+        self._order_count += 1
+        order_id = f"MOCK-{self._order_count:06d}"
+
+        close_side = "sell" if pos["side"] == "long" else "buy"
+        fill = MockFill(
+            order_id=order_id,
+            instrument=instrument,
+            side=close_side,
+            qty=qty,
+            price=price_hint,
+            timestamp=datetime.now(timezone.utc),
+        )
+
+        pos["qty"] -= qty
+        if pos["qty"] <= 0:
+            self._positions.pop(sid, None)
+
+        logger.info(
+            f"[MockOrderManager] PARTIAL CLOSE {order_id}: {close_side.upper()} {qty}x "
+            f"{instrument} @ {price_hint:.2f} strategy={sid} remaining={pos.get('qty', 0)}"
+        )
+        return fill
+
     async def close_position(
         self, instrument: str, price_hint: float,
         strategy_id: str = "",
@@ -311,21 +345,18 @@ async def process_bar(
     if sig.type in (SignalType.BUY, SignalType.SELL):
         side = "long" if sig.type == SignalType.BUY else "short"
 
-        # Build pre-order context
+        # Build pre-order context — active_entry_qty already includes override
         context = PreOrderContext(
             signal=sig,
             instrument=bar.instrument,
             side=side,
-            qty=1,
+            qty=strategy.active_entry_qty,
             strategy_id=sid,
         )
 
-        # Apply SafetyManager qty override before advisors
-        if state.safety:
-            qty_override = state.safety.get_qty_override(sid)
-            if qty_override is not None:
-                context.qty = qty_override
-                context.qty_locked = True
+        # Lock multi-contract entry so FixedSizeAdvisor(qty=1) doesn't override
+        if strategy.active_entry_qty > 1:
+            context.qty_locked = True
 
         # Run advisors via event bus
         context = state.event_bus.emit_pre_order(context)
@@ -336,11 +367,11 @@ async def process_bar(
             )
             return
 
-        # Safety check: sum positions across all strategies for this instrument
+        # Safety check: sum contract qty across all strategies for this instrument
         if state.safety:
             current_exposure = sum(
-                abs(s.position) for s in state.strategies.values()
-                if s.config.instrument == bar.instrument
+                s.state.qty_remaining for s in state.strategies.values()
+                if s.config.instrument == bar.instrument and s.position != 0
             )
             ok, reason = state.safety.check_can_trade(
                 bar.instrument, current_exposure + context.qty,
@@ -397,6 +428,16 @@ async def process_bar(
                             f"[Runner] OCO bracket failed for {failed_sid}, "
                             f"bar-close TP/SL re-enabled"
                         )
+
+    # Partial close signals (TP1 — position stays open with reduced qty)
+    elif sig.type in (SignalType.PARTIAL_CLOSE_LONG, SignalType.PARTIAL_CLOSE_SHORT):
+        if state.order_manager and hasattr(state.order_manager, 'partial_close_position'):
+            await state.order_manager.partial_close_position(
+                instrument=bar.instrument,
+                qty=strategy.active_partial_qty,
+                price_hint=bar.open,
+                strategy_id=sid,
+            )
 
     # Close signals (strategy already recorded the trade internally)
     elif sig.type in (SignalType.CLOSE_LONG, SignalType.CLOSE_SHORT):
@@ -574,10 +615,15 @@ async def reconciliation_loop(state: EngineState) -> None:
 
                 # Sum strategy positions per instrument for comparison
                 # (broker sees ONE net position per symbol)
+                # Use signed qty (not direction flag) so partial fills are correct
                 inst_net: dict[str, int] = {}
                 for strat in state.strategies.values():
                     inst = strat.config.instrument
-                    inst_net[inst] = inst_net.get(inst, 0) + strat.position
+                    if strat.position != 0:
+                        signed_qty = strat.state.qty_remaining * (1 if strat.position == 1 else -1)
+                        inst_net[inst] = inst_net.get(inst, 0) + signed_qty
+                    else:
+                        inst_net[inst] = inst_net.get(inst, 0)
 
                 all_instruments = set(list(inst_net.keys()) + list(broker_positions.keys()))
                 for inst in all_instruments:
@@ -668,7 +714,7 @@ async def _emergency_flatten(state: EngineState, reason: str) -> None:
                             trade.exit_price = fill.price
                             trade.pts = (fill.price - trade.entry_price if trade.side == "long"
                                          else trade.entry_price - fill.price)
-                            trade.pnl_dollar = trade.pts * strat.config.dollar_per_pt
+                            trade.pnl_dollar = trade.pts * strat.config.dollar_per_pt * trade.qty
                             state.event_bus.emit("trade_corrected", trade)
                     except Exception as e:
                         logger.critical(f"[Emergency] Close FAILED for {sid}: {e} — reconciliation will detect")
@@ -692,12 +738,12 @@ def _build_engine_handle(state: EngineState) -> EngineHandle:
             last_price = state.last_prices.get(inst, 0.0)
 
             if strat.position != 0:
-                # Compute unrealized P&L
+                # Compute unrealized P&L (scaled by remaining qty)
                 if strat.state.position == 1:
                     unrealized_pts = last_price - strat.state.entry_price
                 else:
                     unrealized_pts = strat.state.entry_price - last_price
-                unrealized_pnl = unrealized_pts * strat.config.dollar_per_pt
+                unrealized_pnl = unrealized_pts * strat.config.dollar_per_pt * strat.state.qty_remaining
 
                 positions.append({
                     "instrument": inst,
@@ -705,6 +751,8 @@ def _build_engine_handle(state: EngineState) -> EngineHandle:
                     "side": "LONG" if strat.position == 1 else "SHORT",
                     "entry_price": strat.state.entry_price,
                     "unrealized_pnl": round(unrealized_pnl, 2),
+                    "qty": strat.state.qty_remaining,
+                    "partial_filled": strat.state.partial_filled,
                 })
             else:
                 positions.append({
@@ -757,10 +805,27 @@ def _build_engine_handle(state: EngineState) -> EngineHandle:
         }
 
     def get_trades() -> list[TradeRecord]:
-        """Collect all trades across all strategies."""
+        """Collect all trades across all strategies, including open positions."""
         trades = []
         for strat in state.strategies.values():
             trades.extend(strat.trades)
+            # Include open position as a synthetic trade so the dashboard
+            # can render an entry marker on the chart.
+            if strat.position != 0 and strat.state.entry_time is not None:
+                trades.append(TradeRecord(
+                    instrument=strat.config.instrument,
+                    side="long" if strat.state.position == 1 else "short",
+                    entry_price=strat.state.entry_price,
+                    exit_price=0.0,
+                    entry_time=strat.state.entry_time,
+                    exit_time=None,
+                    pts=0.0,
+                    pnl_dollar=0.0,
+                    exit_reason="",
+                    bars_held=strat.bar_idx - strat.state.entry_bar_idx,
+                    strategy_id=strat.strategy_id,
+                    qty=strat.state.qty_remaining,
+                ))
         trades.sort(key=lambda t: t.exit_time if t.exit_time else t.entry_time)
         return trades
 
@@ -819,9 +884,44 @@ def _build_engine_handle(state: EngineState) -> EngineHandle:
         return False, "Safety manager not initialized"
 
     def set_strategy_qty(strategy_id: str, qty: int) -> tuple[bool, str]:
+        """Backward-compatible qty setter — routes through set_strategy_sizing."""
+        return set_strategy_sizing(strategy_id, entry_qty=qty)
+
+    def set_strategy_sizing(strategy_id: str, entry_qty: int = None,
+                            partial_qty: int = None) -> tuple[bool, str]:
+        """Atomic sizing update: sets both entry_qty and partial_qty together.
+
+        Validates as a pair, blocks changes while positioned, and propagates
+        immediately to strategy objects so intra-bar monitor sees current values.
+        """
+        strat = state.strategies.get(strategy_id)
+        if not strat:
+            return False, f"Unknown strategy: {strategy_id}"
+        if strat.position != 0:
+            return False, f"Cannot change sizing while {strategy_id} has an open position"
+
+        # Resolve effective values for validation
+        eff_entry = entry_qty if entry_qty is not None else strat.active_entry_qty
+        eff_partial = partial_qty if partial_qty is not None else strat.active_partial_qty
+
+        if eff_entry < 1:
+            return False, "Entry qty must be >= 1"
+        if strat.config.partial_tp_pts > 0 and eff_partial >= eff_entry:
+            return False, f"Partial qty ({eff_partial}) must be < entry qty ({eff_entry})"
+
+        # Update strategy objects directly (immediate propagation)
+        if entry_qty is not None:
+            strat._entry_qty_override = entry_qty
+            if state.safety:
+                state.safety._strategies[strategy_id].qty_override = entry_qty
+        if partial_qty is not None:
+            strat._partial_qty_override = partial_qty
+            if state.safety:
+                state.safety._strategies[strategy_id].partial_qty_override = partial_qty
+
         if state.safety:
-            return state.safety.set_strategy_qty(strategy_id, qty)
-        return False, "Safety manager not initialized"
+            state.safety._broadcast_status()
+        return True, f"{strategy_id} sizing updated"
 
     def set_drawdown_enabled(enabled: bool) -> tuple[bool, str]:
         if state.safety:
@@ -829,6 +929,10 @@ def _build_engine_handle(state: EngineState) -> EngineHandle:
         return False, "Safety manager not initialized"
 
     def force_resume_all() -> tuple[bool, str]:
+        # Clear strategy overrides before safety reset
+        for strat in state.strategies.values():
+            strat._entry_qty_override = None
+            strat._partial_qty_override = None
         if state.safety:
             return state.safety.force_resume_all()
         return False, "Safety manager not initialized"
@@ -863,7 +967,7 @@ def _build_engine_handle(state: EngineState) -> EngineHandle:
                     trade.exit_price = fill.price
                     trade.pts = (fill.price - trade.entry_price if trade.side == "long"
                                  else trade.entry_price - fill.price)
-                    trade.pnl_dollar = trade.pts * strat.config.dollar_per_pt
+                    trade.pnl_dollar = trade.pts * strat.config.dollar_per_pt * trade.qty
                     state.event_bus.emit("trade_corrected", trade)
             return True, f"Closed {strategy_id}"
 
@@ -880,6 +984,7 @@ def _build_engine_handle(state: EngineState) -> EngineHandle:
         set_strategy_qty=set_strategy_qty,
         set_drawdown_enabled=set_drawdown_enabled,
         force_resume_all=force_resume_all,
+        set_strategy_sizing=set_strategy_sizing,
     )
     handle._close_strategy_position = close_strategy_position
     return handle
@@ -1041,7 +1146,7 @@ async def run(config: EngineConfig) -> None:
             logger.warning(f"[Safety] Trade corrected but no _pre_correction_pnl stamp: {trade.strategy_id}")
             return
         strat_config = safety._strategy_configs.get(trade.strategy_id)
-        commission = 2 * (strat_config.commission_per_side if strat_config else 0.52)
+        commission = 2 * trade.qty * (strat_config.commission_per_side if strat_config else 0.52)
         delta = (trade.pnl_dollar - commission) - (old_pnl - commission)
         if abs(delta) < 0.005:
             return

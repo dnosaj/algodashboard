@@ -30,6 +30,9 @@ class StrategyConfig:
     max_loss_pts: int = 50    # Max loss stop in points (0 = off)
     dollar_per_pt: float = 2.0  # Dollar per point
     commission_per_side: float = 0.52  # Per-contract commission
+    entry_qty: int = 1                  # Default entry size (contracts)
+    partial_tp_pts: int = 0              # Partial TP target in pts (0 = disabled)
+    partial_qty: int = 1                 # Contracts to close at partial TP
     session_start_et: str = "10:00"   # RTH start (Eastern Time)
     session_end_et: str = "15:45"     # Last entry allowed
     session_close_et: str = "16:00"   # Force close all positions
@@ -165,6 +168,9 @@ MES_V2 = StrategyConfig(
     cooldown=25, max_loss_pts=35,  # $175/contract — caps v9.4's uncapped losses
     dollar_per_pt=5.0,
     commission_per_side=1.25,
+    entry_qty=2,           # 2 contracts: partial at TP1, runner to TP2
+    partial_tp_pts=10,     # TP1: close 1 contract at +10 pts ($50)
+    partial_qty=1,         # Close 1 of 2 at TP1
     session_close_et="15:30",  # EOD 15:30 ET validated for MES
 )
 

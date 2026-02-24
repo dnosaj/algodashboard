@@ -95,6 +95,12 @@ class QtyOverrideBody(BaseModel):
     qty: int = Field(gt=0, le=10)
 
 
+class SizingOverrideBody(BaseModel):
+    """Body for setting strategy entry + partial qty overrides."""
+    entry_qty: Optional[int] = Field(None, gt=0, le=100)
+    partial_qty: Optional[int] = Field(None, gt=0, le=100)
+
+
 class DrawdownToggleBody(BaseModel):
     """Body for toggling auto drawdown rules."""
     enabled: bool

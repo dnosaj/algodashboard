@@ -21,12 +21,15 @@ class SignalType(Enum):
     SELL = "SELL"
     CLOSE_LONG = "CLOSE_LONG"
     CLOSE_SHORT = "CLOSE_SHORT"
+    PARTIAL_CLOSE_LONG = "PARTIAL_CLOSE_LONG"
+    PARTIAL_CLOSE_SHORT = "PARTIAL_CLOSE_SHORT"
 
 
 class ExitReason(Enum):
     SM_FLIP = "SM_FLIP"
     STOP_LOSS = "SL"
     TAKE_PROFIT = "TP"
+    TAKE_PROFIT_PARTIAL = "TP1"
     TRAIL_STOP = "TRAIL"
     EOD = "EOD"
     KILL_SWITCH = "KILL"
@@ -58,18 +61,20 @@ class Signal:
 
 @dataclass
 class TradeRecord:
-    """Completed trade record."""
+    """Trade record (closed or open position)."""
     instrument: str
     side: str           # "long" or "short"
     entry_price: float
     exit_price: float
     entry_time: datetime
-    exit_time: datetime
+    exit_time: Optional[datetime]
     pts: float
     pnl_dollar: float
     exit_reason: str
     bars_held: int = 0
     strategy_id: str = ""
+    qty: int = 1            # Contracts closed in this leg
+    is_partial: bool = False # True for partial TP1 exit (position stays open)
 
 
 @dataclass

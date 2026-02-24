@@ -30,6 +30,7 @@ class StrategyStatus:
     pause_reason: str = ""
     manual_override: bool = False   # True after manual resume — prevents auto re-pause
     qty_override: Optional[int] = None  # None = use default (1)
+    partial_qty_override: Optional[int] = None  # None = use config default
     sl_count_today: int = 0
     trade_count_today: int = 0
     daily_pnl: float = 0.0
@@ -93,14 +94,16 @@ class SafetyManager:
         if not strat and sid != "":
             logger.warning(f"[Safety] Unknown strategy_id in trade: {sid}")
 
-        # Commission from strategy config (falls back to $0.52/side)
+        # Commission from strategy config, scaled by qty (falls back to $0.52/side)
         strat_config = self._strategy_configs.get(sid)
-        commission = 2 * (strat_config.commission_per_side if strat_config else 0.52)
+        commission = 2 * trade.qty * (strat_config.commission_per_side if strat_config else 0.52)
         adjusted_pnl = trade.pnl_dollar - commission
 
         # Per-strategy tracking
         if strat:
-            strat.trade_count_today += 1
+            # Only count full closes for trade_count (avoid double-counting partial + final)
+            if not trade.is_partial:
+                strat.trade_count_today += 1
             strat.daily_pnl += adjusted_pnl
             # Only count actual stop-loss exits toward SL counters
             if trade.exit_reason == "SL":
@@ -108,12 +111,16 @@ class SafetyManager:
 
         # Global tracking
         self._global_daily_pnl += adjusted_pnl
-        self._global_trade_count += 1
+        if not trade.is_partial:
+            self._global_trade_count += 1
 
-        if adjusted_pnl < 0:
-            self._consecutive_losses += 1
-        else:
-            self._consecutive_losses = 0
+        # Consecutive losses: skip partial trades entirely (TP1 is always a winner
+        # but resetting prematurely could mask a losing streak; don't count as loss either)
+        if not trade.is_partial:
+            if adjusted_pnl < 0:
+                self._consecutive_losses += 1
+            else:
+                self._consecutive_losses = 0
 
         logger.info(
             f"[Safety] Trade: {sid} raw=${trade.pnl_dollar:+.2f} "
@@ -313,6 +320,7 @@ class SafetyManager:
             strat.pause_reason = ""
             strat.manual_override = False
             strat.qty_override = None
+            strat.partial_qty_override = None
         logger.info("[Safety] FORCE RESUME ALL — all pauses/halts cleared")
         self._broadcast_status()
         return True, "All pauses and halts cleared"
@@ -360,6 +368,7 @@ class SafetyManager:
                 strat.paused = False
                 strat.pause_reason = ""
                 strat.qty_override = None
+                strat.partial_qty_override = None
                 strat.manual_override = False
 
         # 5. Reset global counters
@@ -413,6 +422,7 @@ class SafetyManager:
 
         strategies = {}
         for sid, strat in self._strategies.items():
+            strat_config = self._strategy_configs.get(sid)
             strategies[sid] = {
                 "strategy_id": strat.strategy_id,
                 "instrument": strat.instrument,
@@ -420,6 +430,10 @@ class SafetyManager:
                 "pause_reason": strat.pause_reason,
                 "manual_override": strat.manual_override,
                 "qty_override": strat.qty_override,
+                "partial_qty_override": strat.partial_qty_override,
+                "config_entry_qty": strat_config.entry_qty if strat_config else 1,
+                "config_partial_qty": strat_config.partial_qty if strat_config else 1,
+                "config_partial_tp_pts": strat_config.partial_tp_pts if strat_config else 0,
                 "sl_count_today": strat.sl_count_today,
                 "trade_count_today": strat.trade_count_today,
                 "daily_pnl": round(strat.daily_pnl, 2),

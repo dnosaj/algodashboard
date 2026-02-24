@@ -18,7 +18,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Optional
 
-from .events import Bar, EventBus, ExitReason, TradeRecord
+from .events import Bar, EventBus, ExitReason, SignalType, TradeRecord
 
 logger = logging.getLogger(__name__)
 
@@ -75,17 +75,23 @@ class IntraBarExitMonitor:
                 entry = strat.state.entry_price
                 unrealized = (price - entry) if position == 1 else (entry - price)
 
-                reason = self._check_exit(strat, unrealized)
-                if reason:
+                result = self._check_exit(strat, unrealized)
+                if result:
+                    reason, is_partial = result
                     try:
-                        await self._execute_exit(strat, price, reason)
+                        if is_partial:
+                            await self._execute_partial_exit(strat, price, reason)
+                        else:
+                            await self._execute_exit(strat, price, reason)
                     except Exception as e:
-                        logger.error(f"[Monitor] _execute_exit failed for {sid}: {e}", exc_info=True)
+                        logger.error(f"[Monitor] exit failed for {sid}: {e}", exc_info=True)
                         if self._event_bus:
                             self._event_bus.emit("error", {"msg": f"Intra-bar exit failed for {sid}: {e}", "severity": "CRITICAL"})
 
-    def _check_exit(self, strat, unrealized) -> Optional[ExitReason]:
+    def _check_exit(self, strat, unrealized) -> Optional[tuple[ExitReason, bool]]:
         """Check if unrealized P&L triggers a TP, SL, or trail exit.
+
+        Returns (ExitReason, is_partial) or None.
 
         Updates MFE BEFORE checking trail (order matters: MFE must be
         current before computing trail level).
@@ -103,21 +109,78 @@ class IntraBarExitMonitor:
                     and unrealized >= strat.config.trail_activate_pts):
                 strat.state.trail_activated = True
 
+        # Partial TP1 check (before full TP)
+        if (strat.config.partial_tp_pts > 0
+                and not strat.state.partial_filled
+                and unrealized >= strat.config.partial_tp_pts):
+            return (ExitReason.TAKE_PROFIT_PARTIAL, True)
+
         # TP check
         if strat.config.tp_pts > 0 and unrealized >= strat.config.tp_pts:
-            return ExitReason.TAKE_PROFIT
+            return (ExitReason.TAKE_PROFIT, False)
 
         # SL check (paper mode -- live mode has exchange resting STOP)
         if strat.config.max_loss_pts > 0 and unrealized <= -strat.config.max_loss_pts:
-            return ExitReason.STOP_LOSS
+            return (ExitReason.STOP_LOSS, False)
 
         # Trail check (only tp_scalp mode with trail activated)
         if strat.state.trail_activated:
             trail_level = strat.state.max_favorable - strat.config.trail_distance_pts
             if unrealized <= trail_level:
-                return ExitReason.TRAIL_STOP
+                return (ExitReason.TRAIL_STOP, False)
 
         return None
+
+    async def _execute_partial_exit(self, strat, price: float, reason: ExitReason):
+        """Partial close: close partial_qty contracts, position stays open."""
+        inst = strat.config.instrument
+        sid = strat.config.strategy_id or inst
+        qty = strat.active_partial_qty
+
+        bar = Bar(
+            timestamp=datetime.now(timezone.utc),
+            open=price, high=price, low=price, close=price,
+            volume=0, instrument=inst,
+        )
+
+        # 1. Update strategy state (partial close, position stays open)
+        strat._partial_close(bar, reason, qty=qty, fill_price=price)
+
+        logger.info(
+            f"[Monitor] INTRA-BAR PARTIAL EXIT: {sid} {reason.value} x{qty} @ {price:.2f}"
+        )
+
+        # 2. Place broker partial close order
+        if self._order_manager and self._order_manager.connected:
+            if hasattr(self._order_manager, 'partial_close_position'):
+                try:
+                    fill = await self._order_manager.partial_close_position(
+                        inst, qty, price, strategy_id=sid
+                    )
+                except Exception as e:
+                    logger.critical(f"[Monitor] Broker partial close FAILED for {sid}: {e}")
+                    if self._event_bus:
+                        self._event_bus.emit("error", {"msg": f"Broker partial close failed for {sid}: {e}", "severity": "CRITICAL"})
+                    return
+
+                # 3. Patch trade record with actual fill price
+                if fill and strat.trades and abs(fill.price - price) > 0.001:
+                    trade = strat.trades[-1]
+                    trade._pre_correction_pnl = trade.pnl_dollar
+                    trade.exit_price = fill.price
+                    if trade.side == "long":
+                        trade.pts = fill.price - trade.entry_price
+                    else:
+                        trade.pts = trade.entry_price - fill.price
+                    trade.pnl_dollar = trade.pts * strat.config.dollar_per_pt * trade.qty
+
+                    if self._event_bus:
+                        self._event_bus.emit("trade_corrected", trade)
+
+                    logger.info(
+                        f"[Monitor] Partial fill patched: {sid} actual={fill.price:.2f} "
+                        f"(was {price:.2f}), PnL={trade.pnl_dollar:+.2f}"
+                    )
 
     async def _execute_exit(self, strat, price: float, reason: ExitReason):
         """Close position: update strategy state, then place broker order.
@@ -163,7 +226,7 @@ class IntraBarExitMonitor:
                     trade.pts = fill.price - trade.entry_price
                 else:
                     trade.pts = trade.entry_price - fill.price
-                trade.pnl_dollar = trade.pts * strat.config.dollar_per_pt
+                trade.pnl_dollar = trade.pts * strat.config.dollar_per_pt * trade.qty
 
                 # Notify SafetyManager of corrected P&L
                 if self._event_bus:

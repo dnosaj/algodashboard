@@ -299,13 +299,24 @@ export function PriceChart({ bars, trades, instrument }: PriceChartProps) {
         const exitTime = snapToBar(rawExitTime) as unknown as Time;
         const win = (trade.pnl || 0) >= 0;
 
-        mkrs.push({
-          time: exitTime,
-          position: trade.side === 'LONG' ? 'aboveBar' : 'belowBar',
-          color: win ? '#00ff88' : '#ff4444',
-          shape: 'circle',
-          text: `${win ? '+' : ''}${(trade.pnl || 0).toFixed(0)}`,
-        });
+        if (trade.is_partial) {
+          // Partial exit: square marker with TP1 label
+          mkrs.push({
+            time: exitTime,
+            position: trade.side === 'LONG' ? 'aboveBar' : 'belowBar',
+            color: '#ffaa00',
+            shape: 'square',
+            text: `TP1 +${(trade.pnl || 0).toFixed(0)}`,
+          });
+        } else {
+          mkrs.push({
+            time: exitTime,
+            position: trade.side === 'LONG' ? 'aboveBar' : 'belowBar',
+            color: win ? '#00ff88' : '#ff4444',
+            shape: 'circle',
+            text: `${win ? '+' : ''}${(trade.pnl || 0).toFixed(0)}`,
+          });
+        }
       }
     }
 

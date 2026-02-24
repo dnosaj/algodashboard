@@ -43,6 +43,48 @@ function PausedBadge({ paused }: { paused: boolean }) {
   );
 }
 
+const sizingBtnStyle: React.CSSProperties = {
+  fontSize: 10, fontFamily: FONT, fontWeight: 700,
+  width: 18, height: 20, borderRadius: 3,
+  border: '1px solid #2a2a4a', cursor: 'pointer',
+  backgroundColor: '#16213e', color: '#8888cc',
+  padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+};
+
+function SizingInput({ label, value, min = 1, max = 99, onChange }: {
+  label: string;
+  value: number;
+  min?: number;
+  max?: number;
+  onChange: (v: number) => void;
+}) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+      <span style={{ fontSize: 10, color: '#666', fontFamily: FONT }}>{label}:</span>
+      <button
+        onClick={() => { if (value > min) onChange(value - 1); }}
+        disabled={value <= min}
+        style={{ ...sizingBtnStyle, opacity: value <= min ? 0.3 : 1 }}
+      >
+        -
+      </button>
+      <span style={{
+        fontSize: 11, fontFamily: FONT, fontWeight: 700,
+        color: '#8888cc', minWidth: 16, textAlign: 'center',
+      }}>
+        {value}
+      </span>
+      <button
+        onClick={() => { if (value < max) onChange(value + 1); }}
+        disabled={value >= max}
+        style={{ ...sizingBtnStyle, opacity: value >= max ? 0.3 : 1 }}
+      >
+        +
+      </button>
+    </div>
+  );
+}
+
 export function SafetyPanel({ safety, positions, sendCommand }: SafetyPanelProps) {
   const strategies = Object.values(safety.strategies || {});
   const isHaltedOrPaused = safety.halted || safety.extended_pause;
@@ -172,30 +214,42 @@ export function SafetyPanel({ safety, positions, sendCommand }: SafetyPanelProps
               {s.paused ? 'Resume' : 'Pause'}
             </button>
 
-            {/* Qty selector */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-              <span style={{ fontSize: 10, color: '#666', fontFamily: FONT }}>Qty:</span>
-              {[1, 2, 3].map((q) => {
-                const isActive = (s.qty_override ?? 1) === q;
-                return (
-                  <button
-                    key={q}
-                    onClick={() => sendCommand('strategy_qty', { strategy_id: s.strategy_id, qty: q })}
-                    style={{
-                      fontSize: 10, fontFamily: FONT, fontWeight: isActive ? 700 : 400,
-                      width: 22, height: 22, borderRadius: 3,
-                      border: isActive ? '1px solid #8888cc' : '1px solid #2a2a4a',
-                      cursor: 'pointer',
-                      backgroundColor: isActive ? 'rgba(136,136,204,0.15)' : '#16213e',
-                      color: isActive ? '#8888cc' : '#666',
-                      padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    }}
-                  >
-                    {q}
-                  </button>
-                );
-              })}
-            </div>
+            {/* Sizing controls */}
+            {s.config_partial_tp_pts > 0 ? (
+              /* Strategies WITH partial exit: Entry + TP1 controls */
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <SizingInput
+                  label="Entry"
+                  value={s.qty_override ?? s.config_entry_qty}
+                  min={2}
+                  onChange={(v) => sendCommand('strategy_sizing', {
+                    strategy_id: s.strategy_id,
+                    entry_qty: v,
+                  })}
+                />
+                <SizingInput
+                  label="TP1"
+                  value={s.partial_qty_override ?? s.config_partial_qty}
+                  min={1}
+                  max={(s.qty_override ?? s.config_entry_qty) - 1}
+                  onChange={(v) => sendCommand('strategy_sizing', {
+                    strategy_id: s.strategy_id,
+                    partial_qty: v,
+                  })}
+                />
+              </div>
+            ) : (
+              /* Strategies WITHOUT partial exit: single Qty control */
+              <SizingInput
+                label="Qty"
+                value={s.qty_override ?? s.config_entry_qty}
+                min={1}
+                onChange={(v) => sendCommand('strategy_sizing', {
+                  strategy_id: s.strategy_id,
+                  entry_qty: v,
+                })}
+              />
+            )}
 
             {/* SL today */}
             <span style={{

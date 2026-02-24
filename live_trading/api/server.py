@@ -35,6 +35,7 @@ from .models import (
     ErrorResponse,
     PositionInfo,
     QtyOverrideBody,
+    SizingOverrideBody,
     TradeResponse,
 )
 
@@ -70,6 +71,7 @@ class EngineHandle:
         set_strategy_qty: Any = None,      # Callable[[str, int], tuple[bool, str]]
         set_drawdown_enabled: Any = None,  # Callable[[bool], tuple[bool, str]]
         force_resume_all: Any = None,      # Callable[[], tuple[bool, str]]
+        set_strategy_sizing: Any = None,   # Callable[[str, int|None, int|None], tuple[bool, str]]
     ):
         self.event_bus = event_bus
         self.config = config
@@ -83,6 +85,7 @@ class EngineHandle:
         self._set_strategy_qty = set_strategy_qty
         self._set_drawdown_enabled = set_drawdown_enabled
         self._force_resume_all = force_resume_all
+        self._set_strategy_sizing = set_strategy_sizing
         self._close_strategy_position = None  # Set later if available
 
     def get_status(self) -> dict:
@@ -113,6 +116,13 @@ class EngineHandle:
     def set_strategy_qty(self, strategy_id: str, qty: int) -> tuple[bool, str]:
         if self._set_strategy_qty:
             return self._set_strategy_qty(strategy_id, qty)
+        return False, "Not available"
+
+    def set_strategy_sizing(self, strategy_id: str, entry_qty: int = None,
+                            partial_qty: int = None) -> tuple[bool, str]:
+        if self._set_strategy_sizing:
+            return self._set_strategy_sizing(strategy_id, entry_qty=entry_qty,
+                                             partial_qty=partial_qty)
         return False, "Not available"
 
     def set_drawdown_enabled(self, enabled: bool) -> tuple[bool, str]:
@@ -313,6 +323,8 @@ class EventBridge:
             "pnl": trade.pnl_dollar,
             "exit_reason": trade.exit_reason,
             "bars_held": trade.bars_held,
+            "qty": trade.qty,
+            "is_partial": trade.is_partial,
         })
 
     def _on_trade_corrected(self, trade: TradeRecord) -> None:
@@ -340,6 +352,8 @@ class EventBridge:
             "pnl": trade.pnl_dollar,
             "exit_reason": trade.exit_reason,
             "bars_held": trade.bars_held,
+            "qty": trade.qty,
+            "is_partial": trade.is_partial,
         })
 
     def _on_fill(self, fill: dict) -> None:
@@ -397,9 +411,10 @@ def create_app(handle: EngineHandle) -> FastAPI:
                 await asyncio.sleep(AUTOSAVE_INTERVAL)
                 async with _save_lock:
                     trades = handle.get_trades()
-                    if trades:  # Only save if there are trades
+                    closed = [t for t in trades if t.exit_time is not None]
+                    if closed:  # Only save if there are closed trades
                         _do_save_session()
-                        logger.info(f"[AutoSave] Session saved ({len(trades)} trades)")
+                        logger.info(f"[AutoSave] Session saved ({len(closed)} trades)")
             except asyncio.CancelledError:
                 break
             except Exception as e:
@@ -417,9 +432,10 @@ def create_app(handle: EngineHandle) -> FastAPI:
         # Auto-save on shutdown
         try:
             trades = handle.get_trades()
-            if trades:
+            closed = [t for t in trades if t.exit_time is not None]
+            if closed:
                 _do_save_session()
-                logger.info(f"[Shutdown] Session saved ({len(trades)} trades)")
+                logger.info(f"[Shutdown] Session saved ({len(closed)} trades)")
         except Exception as e:
             logger.error(f"[Shutdown] Save failed: {e}")
         if _autosave_task:
@@ -473,6 +489,8 @@ def create_app(handle: EngineHandle) -> FastAPI:
                 "pnl": t.pnl_dollar,
                 "exit_reason": t.exit_reason,
                 "bars_held": t.bars_held,
+                "qty": t.qty,
+                "is_partial": t.is_partial,
             })
         return result
 
@@ -521,10 +539,10 @@ def create_app(handle: EngineHandle) -> FastAPI:
             if inst not in bars_data:
                 bars_data[inst] = handle.get_bars(inst)
 
-        # Collect trades
+        # Collect closed trades only (exclude synthetic open-position records)
         from zoneinfo import ZoneInfo
         _ET = ZoneInfo("America/New_York")
-        trades = handle.get_trades()
+        trades = [t for t in handle.get_trades() if t.exit_time is not None]
         trades_data = []
         for t in trades:
             entry_et_epoch = None
@@ -549,6 +567,8 @@ def create_app(handle: EngineHandle) -> FastAPI:
                 "pnl": t.pnl_dollar,
                 "exit_reason": t.exit_reason,
                 "bars_held": t.bars_held,
+                "qty": t.qty,
+                "is_partial": t.is_partial,
             })
 
         today = datetime.utcnow().strftime("%Y-%m-%d")
@@ -645,6 +665,14 @@ def create_app(handle: EngineHandle) -> FastAPI:
         ok, msg = handle.set_strategy_qty(strategy_id, body.qty)
         return {"ok": ok, "message": msg}
 
+    @app.post("/api/safety/strategy/{strategy_id}/sizing")
+    def set_strategy_sizing(strategy_id: str, body: SizingOverrideBody) -> dict:
+        """Set entry + partial qty overrides. Body: {entry_qty?: N, partial_qty?: N}"""
+        ok, msg = handle.set_strategy_sizing(strategy_id,
+                                             entry_qty=body.entry_qty,
+                                             partial_qty=body.partial_qty)
+        return {"ok": ok, "message": msg}
+
     @app.post("/api/safety/drawdown/toggle")
     def toggle_drawdown(body: DrawdownToggleBody) -> dict:
         """Toggle auto drawdown rules. Body: {enabled: bool}"""
@@ -735,6 +763,13 @@ def create_app(handle: EngineHandle) -> FastAPI:
                             continue
                         ok, reason = handle.set_strategy_qty(sid, body.qty)
                         await ws.send_text(json.dumps({"ack": "strategy_qty_set" if ok else "error", "message": reason}))
+                    elif command == "strategy_sizing":
+                        sid = msg.get("strategy_id", "")
+                        entry_qty = msg.get("entry_qty")
+                        partial_qty = msg.get("partial_qty")
+                        ok, reason = handle.set_strategy_sizing(
+                            sid, entry_qty=entry_qty, partial_qty=partial_qty)
+                        await ws.send_text(json.dumps({"ack": "strategy_sizing_set" if ok else "error", "message": reason}))
                     elif command == "drawdown_toggle":
                         try:
                             body = DrawdownToggleBody(enabled=msg.get("enabled"))

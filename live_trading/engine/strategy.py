@@ -388,6 +388,9 @@ class TradeState:
     # Trail stop state (tp_scalp mode)
     max_favorable: float = 0.0   # Max favorable excursion in points
     trail_activated: bool = False
+    # Partial exit state (scale-out)
+    qty_remaining: int = 1       # Contracts still open
+    partial_filled: bool = False # True after TP1 partial exit
 
 
 class IncrementalStrategy:
@@ -433,6 +436,10 @@ class IncrementalStrategy:
         # Previous bar data (for stop loss checking bar i-1 close)
         self._prev_bar: Optional[Bar] = None
 
+        # Sizing overrides (set via dashboard, cleared on force_resume/daily_reset)
+        self._entry_qty_override: Optional[int] = None
+        self._partial_qty_override: Optional[int] = None
+
         # Per-strategy lock serializes: monitor exit, bar-close exit, manual exit
         self.trade_lock = asyncio.Lock()
 
@@ -446,6 +453,16 @@ class IncrementalStrategy:
     @property
     def position(self) -> int:
         return self.state.position
+
+    @property
+    def active_entry_qty(self) -> int:
+        """Entry qty: override if set, else config default."""
+        return self._entry_qty_override if self._entry_qty_override is not None else self.config.entry_qty
+
+    @property
+    def active_partial_qty(self) -> int:
+        """Partial close qty: override if set, else config default."""
+        return self._partial_qty_override if self._partial_qty_override is not None else self.config.partial_qty
 
     @property
     def is_warming_up(self) -> bool:
@@ -562,6 +579,15 @@ class IncrementalStrategy:
                 if unrealized > self.state.max_favorable:
                     self.state.max_favorable = unrealized
 
+                # Partial TP1 exit: close partial_qty at partial_tp_pts
+                if (self.config.partial_tp_pts > 0
+                        and not self.state.partial_filled
+                        and unrealized >= self.config.partial_tp_pts):
+                    signal = self._partial_close(bar, ExitReason.TAKE_PROFIT_PARTIAL,
+                                                 qty=self.active_partial_qty)
+                    self._update_prev(sm_now, bar)
+                    return signal
+
                 # TP exit: prev bar close reached TP target
                 if self.config.tp_pts > 0 and unrealized >= self.config.tp_pts:
                     signal = self._close_position(bar, ExitReason.TAKE_PROFIT)
@@ -612,6 +638,8 @@ class IncrementalStrategy:
         self.state.entry_price = bar.open
         self.state.entry_time = bar.timestamp
         self.state.entry_bar_idx = self.bar_idx
+        self.state.qty_remaining = self.active_entry_qty
+        self.state.partial_filled = False
 
         if side == "long":
             self.state.long_used = True
@@ -634,9 +662,9 @@ class IncrementalStrategy:
                     f"SM={sm_val:.4f} RSI={rsi_val:.1f}")
         return signal
 
-    def _close_position(self, bar: Bar, reason: ExitReason,
-                        fill_price: float = None) -> Signal:
-        """Close current position. Fill at bar.open unless overridden."""
+    def _partial_close(self, bar: Bar, reason: ExitReason,
+                       qty: int = 1, fill_price: float = None) -> Signal:
+        """Close partial position (TP1). Position stays open with reduced qty."""
         side = "long" if self.state.position == 1 else "short"
         exit_price = fill_price if fill_price is not None else bar.open
 
@@ -645,7 +673,7 @@ class IncrementalStrategy:
         else:
             pts = self.state.entry_price - exit_price
 
-        pnl = pts * self.config.dollar_per_pt
+        pnl = pts * self.config.dollar_per_pt * qty
 
         trade = TradeRecord(
             instrument=self.config.instrument,
@@ -659,6 +687,59 @@ class IncrementalStrategy:
             exit_reason=reason.value,
             bars_held=self.bar_idx - self.state.entry_bar_idx,
             strategy_id=self.strategy_id,
+            qty=qty,
+            is_partial=True,
+        )
+        self.trades.append(trade)
+
+        # Decrement qty, mark partial filled. Do NOT reset position/exit_bar_idx/MFE/trail.
+        self.state.qty_remaining -= qty
+        self.state.partial_filled = True
+
+        if self.event_bus:
+            self.event_bus.emit("trade_closed", trade)
+
+        logger.info(f"[{self.strategy_id}] PARTIAL CLOSE {side.upper()} x{qty} @ {exit_price:.2f} "
+                    f"PnL={pts:+.2f}pts (${pnl:+.2f}) reason={reason.value} "
+                    f"remaining={self.state.qty_remaining}")
+
+        sig_type = SignalType.PARTIAL_CLOSE_LONG if side == "long" else SignalType.PARTIAL_CLOSE_SHORT
+        return Signal(
+            type=sig_type,
+            instrument=self.config.instrument,
+            reason=reason.value,
+            exit_reason=reason,
+            sm_value=self.state.sm_prev,
+            rsi_value=self.rsi.curr,
+        )
+
+    def _close_position(self, bar: Bar, reason: ExitReason,
+                        fill_price: float = None) -> Signal:
+        """Close current position (all remaining contracts). Fill at bar.open unless overridden."""
+        side = "long" if self.state.position == 1 else "short"
+        exit_price = fill_price if fill_price is not None else bar.open
+        qty = self.state.qty_remaining
+
+        if side == "long":
+            pts = exit_price - self.state.entry_price
+        else:
+            pts = self.state.entry_price - exit_price
+
+        pnl = pts * self.config.dollar_per_pt * qty
+
+        trade = TradeRecord(
+            instrument=self.config.instrument,
+            side=side,
+            entry_price=self.state.entry_price,
+            exit_price=exit_price,
+            entry_time=self.state.entry_time,
+            exit_time=bar.timestamp,
+            pts=pts,
+            pnl_dollar=pnl,
+            exit_reason=reason.value,
+            bars_held=self.bar_idx - self.state.entry_bar_idx,
+            strategy_id=self.strategy_id,
+            qty=qty,
         )
         self.trades.append(trade)
 
@@ -668,11 +749,13 @@ class IncrementalStrategy:
         self.state.exit_bar_idx = self.bar_idx
         self.state.max_favorable = 0.0
         self.state.trail_activated = False
+        self.state.qty_remaining = 1
+        self.state.partial_filled = False
 
         if self.event_bus:
             self.event_bus.emit("trade_closed", trade)
 
-        logger.info(f"[{self.strategy_id}] CLOSE {side.upper()} @ {exit_price:.2f} "
+        logger.info(f"[{self.strategy_id}] CLOSE {side.upper()} x{qty} @ {exit_price:.2f} "
                     f"PnL={pts:+.2f}pts (${pnl:+.2f}) reason={reason.value}")
 
         sig_type = SignalType.CLOSE_LONG if side == "long" else SignalType.CLOSE_SHORT

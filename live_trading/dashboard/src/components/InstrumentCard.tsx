@@ -209,8 +209,17 @@ export function InstrumentCard({ position, data, selected, onSelect }: Instrumen
             display: 'inline-block', padding: '2px 8px', borderRadius: 3,
             backgroundColor: hasTrade ? `${sideColor}15` : 'transparent',
           }}>
-            {side}
+            {(position.qty ?? 1) > 1 ? `${position.qty}x ` : ''}{side}
           </span>
+          {position.partial_filled && (
+            <span style={{
+              fontSize: 9, color: '#ffaa00', fontFamily: FONT, marginLeft: 6,
+              padding: '1px 4px', borderRadius: 2,
+              backgroundColor: 'rgba(255,170,0,0.12)',
+            }}>
+              PARTIAL
+            </span>
+          )}
           {hasTrade && position.entry_price && (
             <span style={{ fontSize: 11, color: '#888', fontFamily: FONT, marginLeft: 8 }}>
               @ {formatPrice(position.entry_price)}
