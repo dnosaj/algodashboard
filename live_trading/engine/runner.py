@@ -578,6 +578,10 @@ def _check_daily_reset(bar: Bar, state: EngineState) -> None:
     Uses Eastern Time dates so the reset aligns with session boundaries
     (session close ~16:00 ET), not midnight UTC (which falls mid-session
     at 7-8 PM ET and would spuriously clear drawdown protection).
+
+    On day change: saves previous day's session, clears trades + bars,
+    resets safety counters and strategy state. Indicators (EMA/RSI) are
+    unaffected — they live in strategy objects, not bar buffers.
     """
     from zoneinfo import ZoneInfo
     _ET = ZoneInfo("America/New_York")
@@ -586,8 +590,28 @@ def _check_daily_reset(bar: Bar, state: EngineState) -> None:
     if state.last_trading_day is None:
         state.last_trading_day = today
     elif today != state.last_trading_day:
-        logger.info(f"[Runner] New trading day detected: {state.last_trading_day} -> {today}")
+        prev_day = state.last_trading_day
+        logger.info(f"[Runner] New trading day detected: {prev_day} -> {today}")
+
+        # 1. Save previous day's session (sync — completes before we clear)
+        save_result = {"ok": False}
+        state.event_bus.emit("daily_rotate", {"previous_date": prev_day, "_result": save_result})
+        if not save_result.get("ok"):
+            logger.error("[Runner] Daily session save failed — NOT clearing buffers, will retry next bar")
+            return
+
+        # 2. Clear bar buffers so dashboard starts fresh
+        if state.data_feed is not None:
+            all_bars = getattr(state.data_feed, '_all_bars', None)
+            if isinstance(all_bars, dict):
+                for inst in all_bars:
+                    all_bars[inst].clear()
+                logger.info("[Runner] Bar buffers cleared for new trading day")
+
+        # 3. Update day tracker
         state.last_trading_day = today
+
+        # 4. Reset safety counters + strategy daily state (clears strat.trades)
         if state.safety:
             state.safety.reset_daily()
         for strat in state.strategies.values():

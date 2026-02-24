@@ -398,6 +398,32 @@ def create_app(handle: EngineHandle) -> FastAPI:
     ws_manager = WebSocketManager()
     bridge = EventBridge(handle.event_bus, ws_manager)
 
+    # --- Daily rotation: save previous day's session on day boundary ---
+    # Called synchronously from EventBus (bar processing loop), so no async
+    # interleaving — _save_lock is not needed here. If this handler is ever
+    # made async, it MUST acquire _save_lock to avoid races with _autosave_loop.
+    def _on_daily_rotate(payload: dict) -> None:
+        prev_date = payload.get("previous_date")
+        if not prev_date:
+            return
+        result = payload.get("_result")  # mutable dict for signalling success
+        try:
+            trades = handle.get_trades()
+            closed = [t for t in trades if t.exit_time is not None]
+            if closed:
+                _do_save_session(date_override=prev_date)
+                logger.info(f"[DailyRotate] Saved session for {prev_date} ({len(closed)} trades)")
+            else:
+                logger.info(f"[DailyRotate] No trades to save for {prev_date}")
+            if result is not None:
+                result["ok"] = True
+        except Exception as e:
+            logger.error(f"[DailyRotate] Save failed for {prev_date}: {e}")
+            if result is not None:
+                result["ok"] = False
+
+    handle.event_bus.subscribe("daily_rotate", _on_daily_rotate)
+
     # Auto-save state
     _autosave_task: Optional[asyncio.Task] = None
     _save_lock = asyncio.Lock()
@@ -530,8 +556,14 @@ def create_app(handle: EngineHandle) -> FastAPI:
     SESSIONS_DIR = Path(__file__).resolve().parent.parent / "sessions"
     SESSIONS_DIR.mkdir(exist_ok=True)
 
-    def _do_save_session() -> dict:
-        """Internal save logic — called by route, auto-save, and shutdown."""
+    def _do_save_session(date_override: str = None) -> dict:
+        """Internal save logic — called by route, auto-save, shutdown, and day rotation.
+
+        Args:
+            date_override: If provided, use this date (YYYY-MM-DD) for the filename
+                           instead of today's UTC date. Used by daily rotation to save
+                           with the previous trading day's ET date.
+        """
         # Collect bars for all instruments
         bars_data: dict[str, list[dict]] = {}
         for sc in handle.config.strategies:
@@ -571,12 +603,18 @@ def create_app(handle: EngineHandle) -> FastAPI:
                 "is_partial": t.is_partial,
             })
 
-        today = datetime.utcnow().strftime("%Y-%m-%d")
-        filename = f"session_{today}.json"
+        if date_override:
+            save_date = date_override
+        else:
+            # Use ET date so session filenames align with trading days,
+            # not UTC (which is 5h ahead and would mismatch after 7 PM ET).
+            from zoneinfo import ZoneInfo
+            save_date = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
+        filename = f"session_{save_date}.json"
         filepath = SESSIONS_DIR / filename
 
         session = {
-            "date": today,
+            "date": save_date,
             "saved_at": datetime.utcnow().isoformat() + "Z",
             "timezone": "ET",  # Bar times are ET-shifted epochs
             "bars": bars_data,
