@@ -92,6 +92,8 @@ class BracketState:
     complex_order_id: Optional[int] = None  # tastytrade complex order ID (OCO)
     is_oco: bool = False                # True if OCO (TP + SL), False if simple stop
     tp_price: float = 0.0              # TP limit price (OCO only)
+    tag: str = ""                      # "tp1", "tp2", or "" (single bracket)
+    qty: int = 1                       # contracts in this bracket
     filled: bool = False
     fill_price: float = 0.0
 
@@ -166,6 +168,15 @@ class TastytradeBroker:
     @property
     def connected(self) -> bool:
         return self._connected
+
+    def _bracket_keys(self, strategy_id: str) -> list[str]:
+        """Return all bracket keys for a strategy (handles composite keys).
+
+        Single bracket: ["MES_V2"]
+        Multi bracket:  ["MES_V2__tp1", "MES_V2__tp2"]
+        """
+        return [k for k in self._brackets
+                if k == strategy_id or k.startswith(f"{strategy_id}__")]
 
     # ------------------------------------------------------------------
     # Connection
@@ -330,29 +341,35 @@ class TastytradeBroker:
         strat = self._strategy_configs.get(sid)
         if strat and strat.max_loss_pts > 0:
             if strat.tp_pts > 0:
-                # OCO bracket: resting LIMIT (TP) + STOP (SL) on exchange
-                try:
-                    await self.place_oco_bracket(
-                        instrument, norm_side, qty, fill_price,
-                        strat.max_loss_pts, strat.tp_pts, strategy_id=sid,
+                if strat.partial_tp_pts > 0 and qty > 1:
+                    # Two independent OCO brackets for partial-exit strategies
+                    await self._place_dual_oco(
+                        instrument, norm_side, qty, fill_price, strat, sid,
                     )
-                except Exception as e:
-                    logger.critical(
-                        f"[TT] OCO bracket FAILED for {sid}: {e} — "
-                        f"falling back to simple stop"
-                    )
+                else:
+                    # Single OCO bracket (existing behavior)
                     try:
-                        await self._place_stop(
+                        await self.place_oco_bracket(
                             instrument, norm_side, qty, fill_price,
-                            strat.max_loss_pts, strategy_id=sid,
+                            strat.max_loss_pts, strat.tp_pts, strategy_id=sid,
                         )
-                        self._oco_failed_sids.add(sid)
-                    except Exception as e2:
-                        self._protection_failed_sids.add(sid)
+                    except Exception as e:
                         logger.critical(
-                            f"[TT] BOTH OCO and fallback stop FAILED for {sid}: {e2} — "
-                            f"position has NO exchange protection, engine should halt"
+                            f"[TT] OCO bracket FAILED for {sid}: {e} — "
+                            f"falling back to simple stop"
                         )
+                        try:
+                            await self._place_stop(
+                                instrument, norm_side, qty, fill_price,
+                                strat.max_loss_pts, strategy_id=sid,
+                            )
+                            self._oco_failed_sids.add(sid)
+                        except Exception as e2:
+                            self._protection_failed_sids.add(sid)
+                            logger.critical(
+                                f"[TT] BOTH OCO and fallback stop FAILED for {sid}: {e2} — "
+                                f"position has NO exchange protection, engine should halt"
+                            )
             else:
                 # SL-only stop (no TP configured)
                 try:
@@ -399,25 +416,36 @@ class TastytradeBroker:
         """
         sid = strategy_id or instrument
 
-        # Cancel any resting stop order FIRST (before popping position)
+        # Cancel any resting stop orders FIRST (before popping position)
         # to prevent a race where the stop fills between pop and cancel,
         # causing a double-close (market order on already-flat position).
-        bracket = self._brackets.get(sid)
-        if bracket and bracket.filled:
-            # Stop already triggered on exchange — position already closed
-            self._brackets.pop(sid, None)
-            self._positions.pop(sid, None)
-            logger.info(f"[TT] Stop already filled for {sid}, skipping close")
-            return None
+        # Check ALL bracket keys (handles composite keys for multi-bracket).
+        keys = self._bracket_keys(sid)
+        for key in keys:
+            bracket = self._brackets.get(key)
+            if bracket and bracket.filled:
+                # At least one bracket already filled — check if it was SL
+                # (SL fills both brackets → full position closed on exchange)
+                tp_dist = abs(bracket.fill_price - bracket.tp_price) if bracket.tp_price else float('inf')
+                sl_dist = abs(bracket.fill_price - bracket.stop_price)
+                if sl_dist <= tp_dist:
+                    # SL hit → full position already closed on exchange
+                    for k in self._bracket_keys(sid):
+                        self._brackets.pop(k, None)
+                    self._positions.pop(sid, None)
+                    logger.info(f"[TT] SL already filled for {sid}, skipping close")
+                    return None
         await self._cancel_bracket(sid)
 
         # Re-check: cancel may have discovered stop filled
-        bracket = self._brackets.get(sid)
-        if bracket and bracket.filled:
-            self._brackets.pop(sid, None)
-            self._positions.pop(sid, None)
-            logger.info(f"[TT] Stop filled during close for {sid}, skipping market close")
-            return None
+        for key in self._bracket_keys(sid):
+            bracket = self._brackets.get(key)
+            if bracket and bracket.filled:
+                for k in self._bracket_keys(sid):
+                    self._brackets.pop(k, None)
+                self._positions.pop(sid, None)
+                logger.info(f"[TT] Stop filled during close for {sid}, skipping market close")
+                return None
 
         pos = self._positions.pop(sid, None)
         if pos is None:
@@ -466,6 +494,76 @@ class TastytradeBroker:
             instrument=instrument,
             side=close_side,
             qty=pos["qty"],
+            price=fill_price,
+            timestamp=datetime.now(timezone.utc),
+        )
+
+    async def partial_close_position(
+        self,
+        instrument: str,
+        qty: int,
+        price_hint: float,
+        strategy_id: str = "",
+    ) -> Optional[FillResult]:
+        """Close partial position via market order. Reduces tracked qty.
+
+        Used as fallback when OCO #2 failed and bar-close TP2 triggers
+        for the runner. Also used for any engine-managed partial exit.
+
+        Args:
+            instrument: "MNQ" or "MES"
+            qty: Number of contracts to close (must be < position qty)
+            price_hint: Current price for fallback
+            strategy_id: Strategy identifier for position lookup
+        """
+        sid = strategy_id or instrument
+        pos = self._positions.get(sid)
+        if pos is None:
+            logger.warning(f"[TT] No position for partial close: {sid}")
+            return None
+
+        future = self._futures[instrument]
+        close_action = OrderAction.SELL if pos["side"] == "long" else OrderAction.BUY
+
+        from decimal import Decimal
+        leg = future.build_leg(Decimal(str(qty)), close_action)
+
+        order = NewOrder(
+            time_in_force=OrderTimeInForce.DAY,
+            order_type=OrderType.MARKET,
+            legs=[leg],
+        )
+
+        close_side = "sell" if pos["side"] == "long" else "buy"
+        logger.info(
+            f"[TT] Submitting PARTIAL CLOSE {close_action.value} "
+            f"{qty}x {instrument} strategy={sid} "
+            f"(remaining will be {pos['qty'] - qty})"
+        )
+
+        response = await self._account.place_order(
+            self._session, order, dry_run=False
+        )
+
+        fill_price = await self._wait_for_fill(response.order, price_hint)
+
+        # Reduce tracked qty (don't pop position — runner still has contracts)
+        pos["qty"] -= qty
+
+        self._order_count += 1
+        order_id = f"TT-{self._order_count:06d}"
+
+        logger.info(
+            f"[TT] PARTIAL CLOSE FILLED {order_id}: {close_side.upper()} "
+            f"{qty}x {instrument} @ {fill_price:.2f} strategy={sid} "
+            f"(remaining={pos['qty']})"
+        )
+
+        return FillResult(
+            order_id=order_id,
+            instrument=instrument,
+            side=close_side,
+            qty=qty,
             price=fill_price,
             timestamp=datetime.now(timezone.utc),
         )
@@ -524,6 +622,7 @@ class TastytradeBroker:
             stop_price=stop_price,
             order_id=response.order.id if response.order else None,
             is_oco=False,
+            qty=qty,
         )
         self._brackets[sid] = bracket
 
@@ -543,6 +642,7 @@ class TastytradeBroker:
         stop_pts: int,
         tp_pts: int,
         strategy_id: str = "",
+        tag: str = "",
     ) -> None:
         """Place an OCO bracket with both stop loss and take profit.
 
@@ -551,6 +651,10 @@ class TastytradeBroker:
 
         For long: STOP SELL at entry - stop_pts, LIMIT SELL at entry + tp_pts
         For short: STOP BUY at entry + stop_pts, LIMIT BUY at entry - tp_pts
+
+        Args:
+            tag: "tp1", "tp2", or "" (single bracket). Used as composite key
+                 suffix for multi-bracket strategies (e.g. "MES_V2__tp1").
         """
         sid = strategy_id or instrument
         future = self._futures[instrument]
@@ -587,78 +691,162 @@ class TastytradeBroker:
             self._session, oco, dry_run=False
         )
 
+        key = f"{sid}__{tag}" if tag else sid
         bracket = BracketState(
             instrument=instrument,
             side=side,
             entry_price=entry_price,
             stop_price=stop_price,
-            complex_order_id=response.order.id if response.order else None,
+            complex_order_id=response.complex_order.id if response.complex_order else None,
             is_oco=True,
             tp_price=tp_price,
+            tag=tag,
+            qty=qty,
         )
-        self._brackets[sid] = bracket
+        self._brackets[key] = bracket
 
+        tag_label = f" [{tag}]" if tag else ""
         logger.info(
-            f"[TT] OCO bracket placed: {sid} ({instrument}) "
-            f"TP={tp_price:.2f} SL={stop_price:.2f}"
+            f"[TT] OCO bracket placed: {sid}{tag_label} ({instrument}) "
+            f"{qty}x TP={tp_price:.2f} SL={stop_price:.2f}"
         )
 
-    async def _cancel_bracket(self, strategy_id: str) -> None:
-        """Cancel resting stop/bracket for a strategy."""
-        bracket = self._brackets.get(strategy_id)  # GET, not POP
-        if bracket is None or bracket.filled:
-            self._brackets.pop(strategy_id, None)
+    async def _place_dual_oco(
+        self,
+        instrument: str,
+        side: str,
+        qty: int,
+        fill_price: float,
+        strat: StrategyConfig,
+        sid: str,
+    ) -> None:
+        """Place two independent OCO brackets for partial-exit strategies.
+
+        OCO #1 (tp1): partial_qty contracts at partial_tp_pts
+        OCO #2 (tp2): remaining contracts at tp_pts
+
+        Each OCO is self-contained with its own SL leg. Both survive engine
+        crashes independently.
+        """
+        partial_qty = strat.partial_qty
+        runner_qty = qty - partial_qty
+
+        # OCO #1: TP1 partial
+        try:
+            await self.place_oco_bracket(
+                instrument, side, partial_qty, fill_price,
+                strat.max_loss_pts, strat.partial_tp_pts,
+                strategy_id=sid, tag="tp1",
+            )
+        except Exception as e:
+            logger.critical(
+                f"[TT] OCO #1 (tp1) FAILED for {sid}: {e} — "
+                f"falling back to single stop for all {qty} contracts"
+            )
+            try:
+                await self._place_stop(
+                    instrument, side, qty, fill_price,
+                    strat.max_loss_pts, strategy_id=sid,
+                )
+                self._oco_failed_sids.add(sid)
+            except Exception as e2:
+                self._protection_failed_sids.add(sid)
+                logger.critical(
+                    f"[TT] BOTH OCO and fallback stop FAILED for {sid}: {e2} — "
+                    f"position has NO exchange protection, engine should halt"
+                )
             return
 
+        # OCO #2: TP2 runner
         try:
-            if bracket.is_oco and bracket.complex_order_id is not None:
-                await self._account.delete_complex_order(
-                    self._session, bracket.complex_order_id
-                )
-            elif bracket.order_id is not None:
-                await self._account.delete_order(
-                    self._session, bracket.order_id
-                )
-            self._brackets.pop(strategy_id, None)  # Only pop on success
-            logger.info(f"[TT] Resting stop cancelled for {strategy_id}")
+            await self.place_oco_bracket(
+                instrument, side, runner_qty, fill_price,
+                strat.max_loss_pts, strat.tp_pts,
+                strategy_id=sid, tag="tp2",
+            )
         except Exception as e:
-            if bracket.filled:
-                self._brackets.pop(strategy_id, None)
-                logger.info(f"[TT] Stop for {strategy_id} filled during cancel @ {bracket.fill_price:.2f}")
-            else:
-                # Do NOT pop -- the stop order may still be live on the exchange.
-                # Leave bracket for _process_alert_fill or reconciliation to handle.
-                logger.critical(
-                    f"[TT] Failed to cancel stop for {strategy_id}, NOT confirmed filled, "
-                    f"bracket KEPT for reconciliation: {e}"
+            logger.critical(
+                f"[TT] OCO #2 (tp2) FAILED for {sid}: {e} — "
+                f"OCO #1 (tp1) still protecting {partial_qty} contracts. "
+                f"Placing simple stop for runner ({runner_qty} contracts)."
+            )
+            try:
+                await self._place_stop(
+                    instrument, side, runner_qty, fill_price,
+                    strat.max_loss_pts, strategy_id=sid,
                 )
+                # Mark OCO failed so bar-close TP re-enables for runner
+                self._oco_failed_sids.add(sid)
+            except Exception as e2:
+                logger.critical(
+                    f"[TT] Runner stop ALSO failed for {sid}: {e2} — "
+                    f"runner ({runner_qty} contracts) has NO exchange protection. "
+                    f"OCO #1 still protects {partial_qty} contracts."
+                )
+                self._protection_failed_sids.add(sid)
 
-    async def check_bracket_fills(self, strategy_id: str) -> Optional[dict]:
-        """Check if a resting stop was triggered by the exchange.
+    async def _cancel_bracket(self, strategy_id: str) -> None:
+        """Cancel all resting stop/bracket orders for a strategy.
+
+        Handles both single keys ("MNQ_V15") and composite keys
+        ("MES_V2__tp1", "MES_V2__tp2").
+        """
+        keys = self._bracket_keys(strategy_id)
+        if not keys:
+            return
+
+        for key in keys:
+            bracket = self._brackets.get(key)
+            if bracket is None or bracket.filled:
+                self._brackets.pop(key, None)
+                continue
+
+            try:
+                if bracket.is_oco and bracket.complex_order_id is not None:
+                    await self._account.delete_complex_order(
+                        self._session, bracket.complex_order_id
+                    )
+                elif bracket.order_id is not None:
+                    await self._account.delete_order(
+                        self._session, bracket.order_id
+                    )
+                self._brackets.pop(key, None)  # Only pop on success
+                logger.info(f"[TT] Resting stop cancelled for {key}")
+            except Exception as e:
+                if bracket.filled:
+                    self._brackets.pop(key, None)
+                    logger.info(f"[TT] Stop for {key} filled during cancel @ {bracket.fill_price:.2f}")
+                else:
+                    # Do NOT pop -- the stop order may still be live on the exchange.
+                    # Leave bracket for _process_alert_fill or reconciliation to handle.
+                    logger.critical(
+                        f"[TT] Failed to cancel stop for {key}, NOT confirmed filled, "
+                        f"bracket KEPT for reconciliation: {e}"
+                    )
+
+    async def check_bracket_fills(self, strategy_id: str) -> list[dict]:
+        """Check if resting brackets were triggered on the exchange.
 
         Non-blocking -- reads from the queue populated by AlertStreamer.
         Call this before processing each bar in the runner.
 
-        Args:
-            strategy_id: Strategy identifier to check bracket fills for.
+        Returns a list of fill dicts (empty if nothing filled). For multi-bracket
+        strategies (partial exit), multiple fills may arrive in the same poll
+        cycle (e.g. both SL legs on a gap down).
 
-        Returns:
-            dict with fill info if stop was hit, None otherwise.
-            Example: {'instrument': 'MNQ', 'strategy_id': 'MNQ_V15',
-                     'type': 'stop_loss', 'price': 21450.0, 'side': 'long'}
+        Each fill dict contains:
+            instrument, strategy_id, type, price, side, tag, qty
+        Where type is one of: "take_profit_partial", "take_profit", "stop_loss"
         """
-        # Drain the queue, looking for fills matching this strategy_id
+        # Drain the queue, collecting fills for this strategy_id
         pending = []
-        result = None
+        results = []
 
         while not self._bracket_fill_queue.empty():
             try:
                 fill_info = self._bracket_fill_queue.get_nowait()
-                if fill_info.get("strategy_id", fill_info.get("instrument")) == strategy_id:
-                    result = fill_info
-                    # Clean up bracket and position state
-                    self._brackets.pop(strategy_id, None)
-                    self._positions.pop(strategy_id, None)
+                if fill_info.get("strategy_id") == strategy_id:
+                    results.append(fill_info)
                 else:
                     pending.append(fill_info)
             except asyncio.QueueEmpty:
@@ -668,7 +856,34 @@ class TastytradeBroker:
         for item in pending:
             await self._bracket_fill_queue.put(item)
 
-        return result
+        # Process each fill: update bracket and position state
+        for fill_info in results:
+            fill_type = fill_info["type"]
+            bracket_key = fill_info.get("bracket_key", strategy_id)
+
+            if fill_type == "take_profit_partial":
+                # Partial TP1: remove only this bracket.
+                # pos["qty"] already reduced in _process_alert_fill().
+                self._brackets.pop(bracket_key, None)
+            elif fill_type in ("stop_loss", "take_profit"):
+                # Full exit: remove ALL brackets for this strategy, pop position
+                # (SL dedup: position may already be popped by prior full fill)
+                pos = self._positions.get(strategy_id)
+                if pos is None:
+                    logger.warning(
+                        f"[TT] Duplicate fill for {strategy_id} "
+                        f"(position already closed), skipping"
+                    )
+                    fill_info["_duplicate"] = True
+                    continue
+                for key in self._bracket_keys(strategy_id):
+                    self._brackets.pop(key, None)
+                self._positions.pop(strategy_id, None)
+
+        # Remove duplicate fills (SL dedup)
+        results = [f for f in results if not f.get("_duplicate")]
+
+        return results
 
     # ------------------------------------------------------------------
     # Fill monitoring
@@ -763,12 +978,18 @@ class TastytradeBroker:
             logger.error("[TT] AlertStreamer max retries reached, stopping")
 
     async def _process_alert_fill(self, order: PlacedOrder) -> None:
-        """Check if a filled order matches an active bracket stop.
+        """Check if a filled order matches an active bracket.
 
         Matches by simple order_id OR by complex_order_id (OCO brackets).
-        Immediately pops the position so close_position() won't double-close.
+        Handles composite keys (e.g. "MES_V2__tp1") for multi-bracket strategies.
+
+        Fill type classification for tagged brackets:
+          - tp1 tag + TP hit → "take_profit_partial" (position stays open)
+          - tp2 tag + TP hit → "take_profit" (full close)
+          - Any tag + SL hit → "stop_loss" (full close)
+          - No tag → existing single-bracket logic
         """
-        for sid, bracket in list(self._brackets.items()):
+        for bracket_key, bracket in list(self._brackets.items()):
             if bracket.filled:
                 continue
 
@@ -786,29 +1007,76 @@ class TastytradeBroker:
                 bracket.filled = True
                 bracket.fill_price = fill_price
 
+                # Extract base strategy_id from composite key
+                sid = bracket_key.split("__")[0] if "__" in bracket_key else bracket_key
+
                 # Determine fill type: TP or SL based on price proximity
                 if bracket.is_oco and bracket.tp_price != 0:
                     tp_dist = abs(fill_price - bracket.tp_price)
                     sl_dist = abs(fill_price - bracket.stop_price)
-                    fill_type = "take_profit" if tp_dist <= sl_dist else "stop_loss"
+                    is_tp = tp_dist <= sl_dist
+                else:
+                    is_tp = False
+
+                # Classify based on tag
+                if is_tp and bracket.tag == "tp1":
+                    fill_type = "take_profit_partial"
+                elif is_tp:
+                    fill_type = "take_profit"
                 else:
                     fill_type = "stop_loss"
 
-                # Pop position immediately so close_position() is a no-op
-                self._positions.pop(sid, None)
+                # Position cleanup is handled by check_bracket_fills(),
+                # NOT here. _process_alert_fill only marks brackets filled
+                # and enqueues fill info. This avoids the bug where popping
+                # the position here causes check_bracket_fills() to see
+                # pos=None and mark fills as duplicates.
+                #
+                # Exception: partial TP reduces pos["qty"] immediately so
+                # close_position() sees correct remaining qty if called
+                # between AlertStreamer fill and next check_bracket_fills().
+                if fill_type == "take_profit_partial":
+                    pos = self._positions.get(sid)
+                    if pos:
+                        pos["qty"] -= bracket.qty
+                elif fill_type == "stop_loss":
+                    # SL dedup for multi-bracket: check if another bracket
+                    # already queued a full-exit fill for this strategy
+                    # (both SL legs fire on gap-down). Use bracket.filled
+                    # on sibling brackets as the dedup signal.
+                    sibling_keys = [k for k in self._bracket_keys(sid)
+                                    if k != bracket_key]
+                    for sib_key in sibling_keys:
+                        sib = self._brackets.get(sib_key)
+                        if sib and sib.filled and sib.fill_price != 0:
+                            # Sibling already processed as SL — skip this one
+                            sib_tp = abs(sib.fill_price - sib.tp_price) if sib.tp_price else float('inf')
+                            sib_sl = abs(sib.fill_price - sib.stop_price)
+                            if sib_sl <= sib_tp:
+                                logger.warning(
+                                    f"[TT] Duplicate SL fill for {bracket_key} — "
+                                    f"sibling {sib_key} already filled as SL, skipping"
+                                )
+                                return
 
                 await self._bracket_fill_queue.put({
                     "instrument": bracket.instrument,
                     "strategy_id": sid,
+                    "bracket_key": bracket_key,
                     "type": fill_type,
                     "price": fill_price,
                     "side": bracket.side,
+                    "tag": bracket.tag,
+                    "qty": bracket.qty,
                 })
 
+                tag_label = f" [{bracket.tag}]" if bracket.tag else ""
+                type_label = {"take_profit_partial": "TP1 PARTIAL",
+                              "take_profit": "TP", "stop_loss": "SL"}[fill_type]
                 logger.info(
-                    f"[TT] {'TP' if fill_type == 'take_profit' else 'SL'} TRIGGERED: "
-                    f"{sid} ({bracket.instrument}) "
-                    f"@ {fill_price:.2f} (was {bracket.side})"
+                    f"[TT] {type_label} TRIGGERED: "
+                    f"{sid}{tag_label} ({bracket.instrument}) "
+                    f"{bracket.qty}x @ {fill_price:.2f} (was {bracket.side})"
                 )
                 return
 

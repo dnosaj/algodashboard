@@ -311,10 +311,9 @@ async def process_bar(
     # sees the position as already closed and won't generate a duplicate
     # close signal.
     if hasattr(state.order_manager, 'check_bracket_fills'):
-        fill_info = await state.order_manager.check_bracket_fills(sid)
-        if fill_info:
-            # Stop was hit on the exchange -- create synthetic bar with
-            # the actual fill price so the trade record is accurate
+        fills = await state.order_manager.check_bracket_fills(sid)
+        fully_closed = False
+        for fill_info in fills:
             fill_price = fill_info["price"]
             synthetic_bar = Bar(
                 timestamp=bar.timestamp,
@@ -322,14 +321,38 @@ async def process_bar(
                 low=fill_price, close=fill_price,
                 volume=0, instrument=bar.instrument,
             )
-            exit_reason = (ExitReason.TAKE_PROFIT
-                           if fill_info.get("type") == "take_profit"
-                           else ExitReason.STOP_LOSS)
-            strategy.force_close(synthetic_bar, exit_reason)
-            logger.info(
-                f"[Runner] Resting bracket triggered for {sid} "
-                f"@ {fill_price:.2f} ({exit_reason.value})"
-            )
+
+            if fill_info["type"] == "take_profit_partial":
+                # Partial TP1: close partial qty, position stays open
+                if strategy.state.position == 0:
+                    logger.warning(
+                        f"[Runner] Skipping stale partial TP1 for {sid} "
+                        f"(position already closed by prior fill)"
+                    )
+                    continue
+                partial_qty = fill_info.get("qty", strategy.active_partial_qty)
+                strategy._partial_close(
+                    synthetic_bar, ExitReason.TAKE_PROFIT_PARTIAL,
+                    qty=partial_qty, fill_price=fill_price,
+                )
+                logger.info(
+                    f"[Runner] Partial bracket TP1 for {sid} "
+                    f"x{partial_qty} @ {fill_price:.2f}"
+                )
+                # DON'T return — position still open, continue to on_bar()
+            else:
+                # Full exit: SL or TP2
+                exit_reason = (ExitReason.TAKE_PROFIT
+                               if fill_info["type"] == "take_profit"
+                               else ExitReason.STOP_LOSS)
+                strategy.force_close(synthetic_bar, exit_reason)
+                logger.info(
+                    f"[Runner] Resting bracket triggered for {sid} "
+                    f"@ {fill_price:.2f} ({exit_reason.value})"
+                )
+                fully_closed = True
+
+        if fully_closed:
             # Still run on_bar so indicators stay current, but the strategy
             # will see position=0 and just update SM/RSI state
             strategy.on_bar(bar)
