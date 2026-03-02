@@ -388,13 +388,17 @@ async def process_bar(
             logger.info(
                 f"[Runner] Trade VETOED by advisor for {sid}: {context.skip_reason}"
             )
+            strategy.reject_entry()
             return
 
-        # Safety check: sum contract qty across all strategies for this instrument
+        # Safety check: sum contract qty across OTHER strategies for this instrument.
+        # Exclude current strategy — _open_position() already set its phantom position
+        # before we reach this check, which would double-count its qty.
         if state.safety:
             current_exposure = sum(
                 s.state.qty_remaining for s in state.strategies.values()
                 if s.config.instrument == bar.instrument and s.position != 0
+                and s.strategy_id != sid
             )
             ok, reason = state.safety.check_can_trade(
                 bar.instrument, current_exposure + context.qty,
@@ -402,10 +406,15 @@ async def process_bar(
             )
             if not ok:
                 logger.warning(f"[Runner] Trade blocked by safety for {sid}: {reason}")
+                strategy.reject_entry()
                 return
 
         # Place order
-        if state.order_manager:
+        if not state.order_manager:
+            strategy.reject_entry()
+            return
+
+        try:
             fill = await state.order_manager.place_market_order(
                 instrument=bar.instrument,
                 side=side,
@@ -413,44 +422,55 @@ async def process_bar(
                 price_hint=bar.open,
                 strategy_id=sid,
             )
-
-            state.event_bus.emit("fill", {
-                "side": side,
-                "price": fill.price,
-                "qty": fill.qty,
-                "order_id": fill.order_id,
-                "instrument": bar.instrument,
-                "strategy_id": sid,
+        except Exception as e:
+            logger.critical(
+                f"[Runner] Order placement FAILED for {sid}: {e}",
+                exc_info=True,
+            )
+            strategy.reject_entry()
+            state.event_bus.emit("error", {
+                "msg": f"Order placement failed for {sid}: {e}",
+                "severity": "CRITICAL",
             })
+            return
 
-            # If ALL protection failed (OCO + fallback stop), halt the engine
-            if hasattr(state.order_manager, 'pop_protection_failures'):
-                for failed_sid in state.order_manager.pop_protection_failures():
-                    if state.safety:
-                        state.safety._halted = True
-                        state.safety._halt_reason = (
-                            f"Broker protection failed for {failed_sid}: "
-                            f"both OCO bracket and fallback stop rejected. "
-                            f"Position has NO exchange protection."
-                        )
-                        logger.critical(
-                            f"[Runner] ENGINE HALTED: broker cannot place "
-                            f"protective orders for {failed_sid}"
-                        )
-                        state.event_bus.emit("error", {
-                            "msg": f"Engine halted: broker protection failed for {failed_sid}",
-                            "severity": "CRITICAL",
-                        })
+        state.event_bus.emit("fill", {
+            "side": side,
+            "price": fill.price,
+            "qty": fill.qty,
+            "order_id": fill.order_id,
+            "instrument": bar.instrument,
+            "strategy_id": sid,
+        })
 
-            # If OCO bracket failed (but stop succeeded), re-enable bar-close TP/SL
-            if hasattr(state.order_manager, 'pop_oco_failures'):
-                for failed_sid in state.order_manager.pop_oco_failures():
-                    if failed_sid in state.strategies:
-                        state.strategies[failed_sid].intrabar_monitor_active = False
-                        logger.warning(
-                            f"[Runner] OCO bracket failed for {failed_sid}, "
-                            f"bar-close TP/SL re-enabled"
-                        )
+        # If ALL protection failed (OCO + fallback stop), halt the engine
+        if hasattr(state.order_manager, 'pop_protection_failures'):
+            for failed_sid in state.order_manager.pop_protection_failures():
+                if state.safety:
+                    state.safety._halted = True
+                    state.safety._halt_reason = (
+                        f"Broker protection failed for {failed_sid}: "
+                        f"both OCO bracket and fallback stop rejected. "
+                        f"Position has NO exchange protection."
+                    )
+                    logger.critical(
+                        f"[Runner] ENGINE HALTED: broker cannot place "
+                        f"protective orders for {failed_sid}"
+                    )
+                    state.event_bus.emit("error", {
+                        "msg": f"Engine halted: broker protection failed for {failed_sid}",
+                        "severity": "CRITICAL",
+                    })
+
+        # If OCO bracket failed (but stop succeeded), re-enable bar-close TP/SL
+        if hasattr(state.order_manager, 'pop_oco_failures'):
+            for failed_sid in state.order_manager.pop_oco_failures():
+                if failed_sid in state.strategies:
+                    state.strategies[failed_sid].intrabar_monitor_active = False
+                    logger.warning(
+                        f"[Runner] OCO bracket failed for {failed_sid}, "
+                        f"bar-close TP/SL re-enabled"
+                    )
 
     # Partial close signals (TP1 — position stays open with reduced qty)
     elif sig.type in (SignalType.PARTIAL_CLOSE_LONG, SignalType.PARTIAL_CLOSE_SHORT):

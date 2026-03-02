@@ -774,6 +774,36 @@ class IncrementalStrategy:
         self.state.sm_prev = sm_now
         self._prev_bar = bar
 
+    def reject_entry(self) -> None:
+        """Undo the state mutation from _open_position() when the runner blocks the entry.
+
+        Called by the runner when safety or an advisor vetoes a BUY/SELL signal,
+        or when the broker order placement fails. Resets position state to flat
+        so the intra-bar monitor doesn't see a phantom position.
+        """
+        if self.state.position == 0:
+            return  # Nothing to undo
+
+        side = "long" if self.state.position == 1 else "short"
+        logger.info(f"[{self.strategy_id}] Entry REJECTED — reverting {side.upper()} "
+                    f"@ {self.state.entry_price:.2f}")
+
+        # Undo _open_position() state changes
+        self.state.position = 0
+        self.state.entry_price = 0.0
+        self.state.entry_time = None
+        self.state.qty_remaining = 1
+        self.state.partial_filled = False
+        self.state.max_favorable = 0.0
+        self.state.trail_activated = False
+
+        # Undo long_used / short_used so the episode flag isn't consumed
+        # by a trade that never happened.
+        if side == "long":
+            self.state.long_used = False
+        else:
+            self.state.short_used = False
+
     def force_close(self, bar: Bar, reason: ExitReason = ExitReason.KILL_SWITCH) -> Optional[Signal]:
         """Force close position (kill switch, connection loss, etc.)."""
         if self.state.position != 0:

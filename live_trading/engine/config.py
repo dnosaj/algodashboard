@@ -126,7 +126,7 @@ MNQ_V15 = StrategyConfig(
     trail_activate_pts=5,
     trail_distance_pts=8,
     rsi_len=8, rsi_buy=60, rsi_sell=40,
-    cooldown=20, max_loss_pts=50,
+    cooldown=20, max_loss_pts=40,
     dollar_per_pt=2.0,
     max_strategy_daily_loss=100.0,
 )

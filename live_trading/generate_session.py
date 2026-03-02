@@ -86,13 +86,15 @@ def run_backtest_tp_exit(opens, highs, lows, closes, sm, times,
                          rsi_5m_curr, rsi_5m_prev,
                          rsi_buy, rsi_sell, sm_threshold,
                          cooldown_bars, max_loss_pts, tp_pts,
-                         eod_minutes_et=NY_CLOSE_ET):
+                         eod_minutes_et=NY_CLOSE_ET,
+                         breakeven_after_bars=0):
     """v15-style backtest: same entries as v10, but TP exit instead of SM flip.
 
     Exit priority:
-      1. SL: prev bar close breaches max_loss_pts -> fill at next open
-      2. TP: prev bar close reaches tp_pts profit -> fill at next open
-      3. EOD: eod_minutes_et -> fill at close
+      1. EOD: eod_minutes_et -> fill at bar close
+      2. SL: prev bar close breaches max_loss_pts -> fill at next open
+      3. TP: prev bar close reaches tp_pts profit -> fill at next open
+      4. BE_TIME: bars held >= breakeven_after_bars -> fill at next open (0=disabled)
     No SM flip exit.
     """
     n = len(opens)
@@ -162,6 +164,15 @@ def run_backtest_tp_exit(opens, highs, lows, closes, sm, times,
                 exit_bar = i
                 continue
 
+            # BE_TIME: stale trade exit after N bars
+            if breakeven_after_bars > 0:
+                bars_in_trade = (i - 1) - entry_idx
+                if bars_in_trade >= breakeven_after_bars:
+                    close_trade("long", entry_price, opens[i], entry_idx, i, "BE_TIME")
+                    trade_state = 0
+                    exit_bar = i
+                    continue
+
         elif trade_state == -1:
             # SL
             if max_loss_pts > 0 and closes[i - 1] >= entry_price + max_loss_pts:
@@ -176,6 +187,15 @@ def run_backtest_tp_exit(opens, highs, lows, closes, sm, times,
                 trade_state = 0
                 exit_bar = i
                 continue
+
+            # BE_TIME: stale trade exit after N bars
+            if breakeven_after_bars > 0:
+                bars_in_trade = (i - 1) - entry_idx
+                if bars_in_trade >= breakeven_after_bars:
+                    close_trade("short", entry_price, opens[i], entry_idx, i, "BE_TIME")
+                    trade_state = 0
+                    exit_bar = i
+                    continue
 
         # Entries
         if trade_state == 0:
