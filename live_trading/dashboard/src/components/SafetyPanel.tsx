@@ -146,6 +146,9 @@ export function SafetyPanel({ safety, positions, sendCommand }: SafetyPanelProps
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <span style={{ fontSize: 10, color: '#666', fontFamily: FONT }}>
+            VIX: {safety.vix_close?.toFixed(1) ?? '—'}
+          </span>
+          <span style={{ fontSize: 10, color: '#666', fontFamily: FONT }}>
             5d SL: {safety.rolling_sl_5d}
           </span>
           <button
@@ -195,8 +198,21 @@ export function SafetyPanel({ safety, positions, sendCommand }: SafetyPanelProps
               {s.strategy_id}
             </span>
 
-            {/* Paused badge */}
-            <PausedBadge paused={s.paused} />
+            {/* Status badge: PAUSED > VIX GATE > ACTIVE */}
+            {s.paused ? (
+              <PausedBadge paused={true} />
+            ) : s.vix_gated ? (
+              <span style={{
+                fontSize: 10, fontWeight: 600, fontFamily: FONT,
+                padding: '2px 6px', borderRadius: 3,
+                backgroundColor: 'rgba(255,170,0,0.12)',
+                color: '#ffaa00',
+              }}>
+                VIX GATE
+              </span>
+            ) : (
+              <PausedBadge paused={false} />
+            )}
 
             {/* Pause/Resume button */}
             <button

@@ -84,6 +84,9 @@ class SafetyManager:
             (s.strategy_id or s.instrument): [] for s in config.strategies
         }
 
+        # VIX death zone gating
+        self._vix_close: float | None = None
+
     # ------------------------------------------------------------------
     # Event bus handlers (registered externally)
     # ------------------------------------------------------------------
@@ -238,6 +241,18 @@ class SafetyManager:
             if strat and strat.paused:
                 return False, f"Strategy {strategy_id} paused: {strat.pause_reason}"
 
+        # VIX death zone gate (per-strategy, based on config bounds)
+        if strategy_id and self._vix_close is not None:
+            cfg = self._strategy_configs.get(strategy_id)
+            if cfg and cfg.vix_death_zone_min > 0:
+                if cfg.vix_death_zone_min <= self._vix_close <= cfg.vix_death_zone_max:
+                    strat = self._strategies.get(strategy_id)
+                    if strat and not strat.manual_override:
+                        return False, (
+                            f"VIX death zone: VIX {self._vix_close:.1f} "
+                            f"in [{cfg.vix_death_zone_min}-{cfg.vix_death_zone_max}]"
+                        )
+
         # Position size check
         if qty > self._config.max_position_size:
             return False, (
@@ -287,6 +302,12 @@ class SafetyManager:
     # ------------------------------------------------------------------
     # Manual overrides (called from API)
     # ------------------------------------------------------------------
+
+    def set_vix_close(self, vix_close: float | None) -> None:
+        """Update prior-day VIX close for death zone gating."""
+        self._vix_close = vix_close
+        logger.info(f"[Safety] VIX close set to: {vix_close}")
+        self._broadcast_status()
 
     def set_strategy_paused(self, strategy_id: str, paused: bool) -> tuple[bool, str]:
         """Pause or resume a strategy. Returns (ok, message)."""
@@ -453,6 +474,16 @@ class SafetyManager:
             # Per-strategy rolling 5-day SL: last 4 days of history + today
             hist = self._per_strategy_sl_history.get(sid, [])
             sl_rolling_5d = sum(hist[-4:]) + strat.sl_count_today
+            # VIX death zone: gated if VIX in range AND no manual override
+            cfg = self._strategy_configs.get(sid)
+            vix_gated = (
+                self._vix_close is not None
+                and cfg is not None
+                and cfg.vix_death_zone_min > 0
+                and cfg.vix_death_zone_min <= self._vix_close <= cfg.vix_death_zone_max
+                and not strat.manual_override
+            )
+
             strategies[sid] = {
                 "strategy_id": strat.strategy_id,
                 "instrument": strat.instrument,
@@ -468,11 +499,13 @@ class SafetyManager:
                 "sl_rolling_5d": sl_rolling_5d,
                 "trade_count_today": strat.trade_count_today,
                 "daily_pnl": round(strat.daily_pnl, 2),
+                "vix_gated": vix_gated,
             }
 
         return {
             "halted": self._halted,
             "halt_reason": self._halt_reason,
+            "vix_close": self._vix_close,
             "daily_pnl": round(self._global_daily_pnl, 2),
             "consecutive_losses": self._consecutive_losses,
             "trade_count_today": self._global_trade_count,

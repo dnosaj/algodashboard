@@ -19,6 +19,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Optional
 
+from zoneinfo import ZoneInfo
+
 from engine.config import EngineConfig, StrategyConfig
 from engine.events import (
     Bar, EventBus, ExitReason, PreOrderContext, Signal, SignalType, TradeRecord,
@@ -126,7 +128,7 @@ class MockOrderManager:
 
     def __init__(self):
         self._order_count = 0
-        self._positions: dict[str, dict] = {}  # instrument -> {side, qty, avg_price}
+        self._positions: dict[str, dict] = {}  # strategy_id -> {side, qty, avg_price, instrument}
         self._connected = False
 
     async def connect(self) -> None:
@@ -242,8 +244,31 @@ class MockOrderManager:
         return fill
 
     async def reconcile_positions(self) -> dict[str, dict]:
-        """Return current positions (mock just returns internal state)."""
-        return dict(self._positions)
+        """Return positions aggregated by instrument (matches TastytradeBroker format).
+
+        Internal _positions are keyed by strategy_id. The recon loop expects
+        instrument-keyed positions: {instrument: {side, qty, avg_price}}.
+        """
+        inst_net: dict[str, int] = {}
+        inst_price: dict[str, float] = {}
+        for pos in self._positions.values():
+            inst = pos.get("instrument", "")
+            if not inst:
+                continue
+            signed = pos["qty"] * (1 if pos["side"] == "long" else -1)
+            inst_net[inst] = inst_net.get(inst, 0) + signed
+            inst_price[inst] = pos.get("avg_price", 0.0)
+
+        result: dict[str, dict] = {}
+        for inst, net in inst_net.items():
+            if net == 0:
+                continue
+            result[inst] = {
+                "side": "long" if net > 0 else "short",
+                "qty": abs(net),
+                "avg_price": inst_price.get(inst, 0.0),
+            }
+        return result
 
 
 # SafetyManager imported from engine.safety_manager
@@ -280,6 +305,45 @@ class EngineState:
     last_quote_time: float = 0.0
     # Flag for intra-bar monitor active state
     intrabar_monitor_active: bool = False
+    # Reason for the last emergency flatten (used for auto-recovery logic)
+    _flatten_reason: str = ""
+
+
+# ---------------------------------------------------------------------------
+# VIX gate phantom signal logging
+# ---------------------------------------------------------------------------
+
+def _log_vix_blocked_signal(
+    state: 'EngineState', bar: Bar, sig: Signal, sid: str, side: str, reason: str,
+) -> None:
+    """Append a blocked signal to CSV for post-hoc 'would have entered' analysis.
+
+    Writes to logs/vix_blocked_signals.csv. Does not touch trades, stats, or UI.
+    """
+    import csv
+    from pathlib import Path
+
+    log_dir = Path(state.config.log_dir)
+    log_dir.mkdir(parents=True, exist_ok=True)
+    csv_path = log_dir / "vix_blocked_signals.csv"
+
+    write_header = not csv_path.exists()
+    try:
+        with open(csv_path, "a", newline="") as f:
+            writer = csv.writer(f)
+            if write_header:
+                writer.writerow([
+                    "timestamp", "strategy_id", "instrument", "side",
+                    "price", "sm_value", "rsi_value", "reason",
+                ])
+            writer.writerow([
+                bar.time.isoformat() if hasattr(bar.time, 'isoformat') else str(bar.time),
+                sid, bar.instrument, side,
+                f"{bar.close:.2f}", f"{sig.sm_value:.4f}", f"{sig.rsi_value:.2f}",
+                reason,
+            ])
+    except Exception as e:
+        logger.warning(f"[Runner] Failed to log VIX blocked signal: {e}")
 
 
 # ---------------------------------------------------------------------------
@@ -406,6 +470,9 @@ async def process_bar(
             )
             if not ok:
                 logger.warning(f"[Runner] Trade blocked by safety for {sid}: {reason}")
+                # Log phantom signal for VIX gate analysis
+                if "VIX death zone" in reason:
+                    _log_vix_blocked_signal(state, bar, sig, sid, side, reason)
                 strategy.reject_entry()
                 return
 
@@ -518,6 +585,13 @@ async def bar_processing_loop(state: EngineState) -> None:
 
         if state.shutdown_event.is_set():
             break
+
+        # Always update heartbeat timestamp, even when trading is paused.
+        # This allows auto-recovery to detect that the data feed is alive again.
+        if state.safety:
+            state.safety.on_bar(bar)
+        state.last_prices[bar.instrument] = bar.close
+
         if not state.trading_active:
             continue
 
@@ -612,6 +686,14 @@ async def intra_bar_exit_loop(state: EngineState) -> None:
                 mid = (bid + ask) / 2.0
                 state.last_prices[instrument] = mid
                 state.last_quote_time = time.time()
+
+                # Re-enable intra-bar monitor if it was disabled by staleness (Bug #36)
+                if not state.intrabar_monitor_active and (monitor._monitored or oco_sids):
+                    state.intrabar_monitor_active = True
+                    for sid in monitor._monitored:
+                        state.strategies[sid].intrabar_monitor_active = True
+                    logger.info("[Runner] Quote feed recovered — intra-bar monitor re-enabled")
+
                 await monitor.on_quote(instrument, bid, ask)
 
 
@@ -657,6 +739,10 @@ def _check_daily_reset(bar: Bar, state: EngineState) -> None:
         # 4. Reset safety counters + strategy daily state (clears strat.trades)
         if state.safety:
             state.safety.reset_daily()
+            # Re-fetch VIX for new trading day
+            from engine.vix_gate import fetch_prior_day_vix_close
+            vix_close = fetch_prior_day_vix_close()
+            state.safety.set_vix_close(vix_close)
         for strat in state.strategies.values():
             strat.reset_daily()
 
@@ -716,6 +802,39 @@ async def reconciliation_loop(state: EngineState) -> None:
                 logger.error(f"[Recon] Reconciliation error: {e}", exc_info=True)
 
 
+_ET = ZoneInfo("America/New_York")
+_cme_suppression_logged = False
+
+
+def _in_cme_maintenance_window(state: EngineState) -> bool:
+    """Return True if current time is inside the CME equity futures maintenance window.
+
+    CME equity futures close at ~16:59 ET and reopen at 18:00 ET daily.
+    We suppress heartbeat checks during 16:57-18:03 ET (with margin on both sides).
+
+    Safety guard: if ANY strategy has an open position, do NOT suppress —
+    this means EOD close failed and heartbeat is the last safety net.
+    """
+    global _cme_suppression_logged
+    now_et = datetime.now(_ET)
+    minutes = now_et.hour * 60 + now_et.minute  # 0-1439
+
+    # 16:57 = 1017, 18:03 = 1083
+    if not (1017 <= minutes <= 1083):
+        _cme_suppression_logged = False
+        return False
+
+    # Safety guard: don't suppress if any strategy has an open position
+    for strat in state.strategies.values():
+        if strat.position != 0:
+            return False
+
+    if not _cme_suppression_logged:
+        logger.debug("[Heartbeat] CME maintenance window — heartbeat suppressed (16:57-18:03 ET)")
+        _cme_suppression_logged = True
+    return True
+
+
 async def heartbeat_loop(state: EngineState) -> None:
     """Monitor data feed health and trigger alerts."""
     logger.info("[Runner] Heartbeat monitor started")
@@ -729,6 +848,10 @@ async def heartbeat_loop(state: EngineState) -> None:
             break
         except asyncio.TimeoutError:
             pass
+
+        # Skip heartbeat checks during CME maintenance window (16:57-18:03 ET)
+        if _in_cme_maintenance_window(state):
+            continue
 
         if state.safety and state.trading_active:
             healthy, elapsed = state.safety.check_heartbeat()
@@ -750,12 +873,50 @@ async def heartbeat_loop(state: EngineState) -> None:
                     )
                     await _emergency_flatten(state, "connection_timeout")
 
+        # Auto-recovery: re-enable trading after connection_timeout flatten
+        # Only recovers for connection_timeout — not shutdown, kill_switch, or manual_pause
+        elif (state.safety and not state.trading_active
+              and state._flatten_reason == "connection_timeout"):
+            healthy, elapsed = state.safety.check_heartbeat()
+            if healthy:
+                state.trading_active = True
+                state._flatten_reason = ""
+                logger.info("[Heartbeat] Data feed recovered. Trading re-enabled.")
+                state.event_bus.emit("error", {
+                    "msg": "Data feed recovered — trading re-enabled",
+                    "severity": "INFO",
+                })
+
+
+def _has_oco_protection(state: EngineState, strategy_id: str) -> bool:
+    """Check if a strategy has active (unfilled) OCO brackets resting on exchange.
+
+    Returns False for MockOrderManager (paper mode — no _brackets).
+    """
+    brackets = getattr(state.order_manager, '_brackets', None)
+    if not brackets:
+        return False
+    bracket_keys_fn = getattr(state.order_manager, '_bracket_keys', None)
+    if bracket_keys_fn:
+        keys = bracket_keys_fn(strategy_id)
+    else:
+        keys = [k for k in brackets if k == strategy_id or k.startswith(f"{strategy_id}__")]
+    return any(not brackets[k].filled for k in keys if k in brackets)
+
 
 async def _emergency_flatten(state: EngineState, reason: str) -> None:
     """Emergency flatten all positions using last known prices."""
     state.trading_active = False
+    state._flatten_reason = reason
     for sid, strat in state.strategies.items():
         if strat.position != 0:
+            # Skip OCO-protected strategies on feed timeout — brackets are
+            # resting on exchange and will execute regardless of our connectivity.
+            # Sending a market close while brackets are live risks reversing position.
+            if reason == "connection_timeout" and _has_oco_protection(state, sid):
+                logger.info(f"[Emergency] Skipping {sid} — active OCO brackets on exchange")
+                continue
+
             async with strat.trade_lock:
                 if strat.position == 0:
                     continue  # Closed by another path while waiting for lock
@@ -785,7 +946,7 @@ async def _emergency_flatten(state: EngineState, reason: str) -> None:
                             state.event_bus.emit("trade_corrected", trade)
                     except Exception as e:
                         logger.critical(f"[Emergency] Close FAILED for {sid}: {e} — reconciliation will detect")
-    logger.warning(f"[Emergency] All positions flattened ({reason})")
+    logger.warning(f"[Emergency] Emergency flatten complete ({reason})")
 
 
 # ---------------------------------------------------------------------------
@@ -898,12 +1059,14 @@ def _build_engine_handle(state: EngineState) -> EngineHandle:
 
     def pause_trading() -> None:
         state.trading_active = False
+        state._flatten_reason = "manual_pause"
         logger.info("[API] Trading PAUSED")
 
     def resume_trading() -> tuple[bool, str]:
         if state.safety and state.safety.halted:
             return False, f"Cannot resume: {state.safety.halt_reason}"
         state.trading_active = True
+        state._flatten_reason = ""
         logger.info("[API] Trading RESUMED")
         return True, ""
 
@@ -1202,6 +1365,11 @@ async def run(config: EngineConfig) -> None:
     # --- 5. Initialize safety manager ---
     safety = SafetyManager(config, event_bus=event_bus)
     state.safety = safety
+
+    # Fetch prior-day VIX close for death zone gating
+    from engine.vix_gate import fetch_prior_day_vix_close
+    vix_close = fetch_prior_day_vix_close()
+    state.safety.set_vix_close(vix_close)
 
     # Register safety with event bus (only via event bus, no direct calls)
     event_bus.subscribe("bar", safety.on_bar)

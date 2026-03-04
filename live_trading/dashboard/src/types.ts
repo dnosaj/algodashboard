@@ -120,11 +120,13 @@ export interface SafetyStrategyStatus {
   sl_rolling_5d: number;
   trade_count_today: number;
   daily_pnl: number;
+  vix_gated: boolean;
 }
 
 export interface SafetyStatusData {
   halted: boolean;
   halt_reason: string;
+  vix_close: number | null;
   daily_pnl: number;
   consecutive_losses: number;
   trade_count_today: number;

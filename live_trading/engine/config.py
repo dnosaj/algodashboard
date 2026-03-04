@@ -34,6 +34,8 @@ class StrategyConfig:
     partial_tp_pts: int = 0              # Partial TP target in pts (0 = disabled)
     partial_qty: int = 1                 # Contracts to close at partial TP
     max_strategy_daily_loss: float = 0.0  # Max daily loss per strategy (0 = disabled)
+    vix_death_zone_min: float = 0.0   # VIX death zone lower bound (0 = disabled)
+    vix_death_zone_max: float = 0.0   # VIX death zone upper bound (0 = disabled)
     session_start_et: str = "10:00"   # RTH start (Eastern Time)
     session_end_et: str = "15:45"     # Last entry allowed
     session_close_et: str = "16:00"   # Force close all positions
@@ -129,6 +131,8 @@ MNQ_V15 = StrategyConfig(
     cooldown=20, max_loss_pts=40,
     dollar_per_pt=2.0,
     max_strategy_daily_loss=100.0,
+    vix_death_zone_min=19.0,
+    vix_death_zone_max=22.0,
 )
 
 MNQ_VSCALPB = StrategyConfig(
@@ -144,6 +148,8 @@ MNQ_VSCALPB = StrategyConfig(
     cooldown=20, max_loss_pts=15,  # Tight stop: wrong fast = out fast
     dollar_per_pt=2.0,
     max_strategy_daily_loss=100.0,
+    vix_death_zone_min=19.0,
+    vix_death_zone_max=22.0,
 )
 
 # MES v9.4 -- REPLACED by MES_V2 (TP=20 exit). Kept for reference.
