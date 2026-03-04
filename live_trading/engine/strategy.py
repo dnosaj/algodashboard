@@ -605,8 +605,16 @@ class IncrementalStrategy:
                         self._update_prev(sm_now, bar)
                         return signal
 
+        # BE_TIME exit: close stale trades after N bars (bar-close only, not intra-bar)
+        if self.config.breakeven_after_bars > 0 and self.state.position != 0:
+            bars_held = self.bar_idx - self.state.entry_bar_idx - 1  # -1 matches backtest (i-1)-entry_idx
+            if bars_held >= self.config.breakeven_after_bars:
+                signal = self._close_position(bar, ExitReason.BE_TIME)
+                self._update_prev(sm_now, bar)
+                return signal
+
         # SM flip exit — ALWAYS bar-close (not handled by monitor)
-        elif self.config.exit_mode == "sm_flip" and self.state.position != 0:
+        if self.config.exit_mode == "sm_flip" and self.state.position != 0:
             # SM flip exits (original v11 logic)
             if self.state.position == 1:
                 if sm_prev < 0 and sm_prev2 >= 0:

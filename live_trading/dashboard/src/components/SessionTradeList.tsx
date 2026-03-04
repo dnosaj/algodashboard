@@ -39,8 +39,11 @@ function exitLabel(reason: string): string {
     SM_FLIP: 'SM Flip',
     SL: 'Max Loss',
     TP: 'Take Profit',
+    TP1: 'Partial TP',
     EOD: 'EOD Close',
     TRAIL: 'Trail Stop',
+    BE_TIME: 'Stale Exit',
+    KILL: 'Kill Switch',
   };
   return map[reason] || reason;
 }
@@ -241,11 +244,15 @@ export function SessionTradeList({ trades }: SessionTradeListProps) {
                           r.exit_reason === 'TP' ? '#00ff8815' :
                           r.exit_reason === 'SL' ? '#ff444415' :
                           r.exit_reason === 'SM_FLIP' ? '#8888cc15' :
+                          r.exit_reason === 'BE_TIME' ? '#ffaa4415' :
+                          r.exit_reason === 'TP1' ? '#00ccff15' :
                           '#88888815',
                         color:
                           r.exit_reason === 'TP' ? '#00ff88' :
                           r.exit_reason === 'SL' ? '#ff4444' :
                           r.exit_reason === 'SM_FLIP' ? '#8888cc' :
+                          r.exit_reason === 'BE_TIME' ? '#ffaa44' :
+                          r.exit_reason === 'TP1' ? '#00ccff' :
                           '#888',
                       }}
                     >

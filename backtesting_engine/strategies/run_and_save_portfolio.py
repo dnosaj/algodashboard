@@ -51,7 +51,7 @@ from generate_session import (
     # MES v2 params
     MESV2_RSI_LEN, MESV2_RSI_BUY, MESV2_RSI_SELL,
     MESV2_SM_THRESHOLD, MESV2_COOLDOWN,
-    MESV2_MAX_LOSS_PTS, MESV2_TP_PTS, MESV2_EOD_ET,
+    MESV2_MAX_LOSS_PTS, MESV2_TP_PTS, MESV2_EOD_ET, MESV2_BREAKEVEN_BARS,
 )
 
 from results.save_results import save_backtest
@@ -63,7 +63,7 @@ def run_strategy(name, strategy_id, opens, highs, lows, closes, sm, times,
                  rsi_curr, rsi_prev, rsi_buy, rsi_sell, sm_threshold,
                  cooldown, max_loss_pts, tp_pts, dollar_per_pt, commission,
                  params_dict, data_range, split="FULL", eod_et=None,
-                 entry_end_et=None):
+                 entry_end_et=None, breakeven_after_bars=0):
     """Run a single strategy and save results."""
     kwargs = dict(
         rsi_buy=rsi_buy, rsi_sell=rsi_sell,
@@ -74,6 +74,8 @@ def run_strategy(name, strategy_id, opens, highs, lows, closes, sm, times,
         kwargs["eod_minutes_et"] = eod_et
     if entry_end_et is not None:
         kwargs["entry_end_et"] = entry_end_et
+    if breakeven_after_bars > 0:
+        kwargs["breakeven_after_bars"] = breakeven_after_bars
 
     trades = run_backtest_tp_exit(
         opens, highs, lows, closes, sm, times,
@@ -236,6 +238,7 @@ def main():
             "rsi_sell": MESV2_RSI_SELL, "cooldown": MESV2_COOLDOWN,
             "max_loss_pts": MESV2_MAX_LOSS_PTS, "tp_pts": MESV2_TP_PTS,
             "eod_et": MESV2_EOD_ET,
+            "breakeven_after_bars": MESV2_BREAKEVEN_BARS,
         }
         run_strategy(
             "MES v2", "MES_V2",
@@ -245,6 +248,7 @@ def main():
             MESV2_COOLDOWN, MESV2_MAX_LOSS_PTS, MESV2_TP_PTS,
             MES_DOLLAR_PER_PT, MES_COMMISSION,
             mesv2_params, dr, split_name, eod_et=MESV2_EOD_ET,
+            breakeven_after_bars=MESV2_BREAKEVEN_BARS,
         )
 
     print(f"\n{'='*70}")

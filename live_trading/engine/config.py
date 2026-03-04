@@ -33,6 +33,7 @@ class StrategyConfig:
     entry_qty: int = 1                  # Default entry size (contracts)
     partial_tp_pts: int = 0              # Partial TP target in pts (0 = disabled)
     partial_qty: int = 1                 # Contracts to close at partial TP
+    breakeven_after_bars: int = 0         # Close stale trades after N bars (0 = disabled)
     max_strategy_daily_loss: float = 0.0  # Max daily loss per strategy (0 = disabled)
     vix_death_zone_min: float = 0.0   # VIX death zone lower bound (0 = disabled)
     vix_death_zone_max: float = 0.0   # VIX death zone upper bound (0 = disabled)
@@ -181,6 +182,7 @@ MES_V2 = StrategyConfig(
     entry_qty=2,           # 2 contracts: partial at TP1, runner to TP2
     partial_tp_pts=10,     # TP1: close 1 contract at +10 pts ($50)
     partial_qty=1,         # Close 1 of 2 at TP1
+    breakeven_after_bars=75,   # Close stale trades after 75 bars (~1h15m)
     max_strategy_daily_loss=200.0,
     session_close_et="15:30",  # EOD 15:30 ET validated for MES
 )

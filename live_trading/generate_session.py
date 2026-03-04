@@ -81,6 +81,7 @@ MESV2_COOLDOWN = 25
 MESV2_MAX_LOSS_PTS = 35
 MESV2_TP_PTS = 20
 MESV2_EOD_ET = 15 * 60 + 30  # 15:30 ET = 930 minutes
+MESV2_BREAKEVEN_BARS = 75    # Close stale trades after 75 bars (~1h15m)
 
 
 def run_backtest_tp_exit(opens, highs, lows, closes, sm, times,
@@ -428,6 +429,7 @@ def run_session(df_mnq: pd.DataFrame, target_dates: list[str],
             sm_threshold=MESV2_SM_THRESHOLD, cooldown_bars=MESV2_COOLDOWN,
             max_loss_pts=MESV2_MAX_LOSS_PTS, tp_pts=MESV2_TP_PTS,
             eod_minutes_et=MESV2_EOD_ET,
+            breakeven_after_bars=MESV2_BREAKEVEN_BARS,
         )
         compute_mfe_mae(mesv2_trades, mes_highs, mes_lows)
 

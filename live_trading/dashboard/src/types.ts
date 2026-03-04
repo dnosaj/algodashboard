@@ -18,6 +18,7 @@ export interface InstrumentData {
   cooldown_total: number;
   max_loss_pts: number;
   bars_held: number;
+  breakeven_after_bars: number;
   exit_mode: string;
   tp_pts: number;
   long_used: boolean;

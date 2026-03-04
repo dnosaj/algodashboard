@@ -1006,6 +1006,7 @@ def _build_engine_handle(state: EngineState) -> EngineHandle:
                 "cooldown_total": strat.config.cooldown,
                 "max_loss_pts": strat.config.max_loss_pts,
                 "bars_held": bars_held,
+                "breakeven_after_bars": strat.config.breakeven_after_bars,
                 "exit_mode": strat.config.exit_mode,
                 "tp_pts": strat.config.tp_pts,
                 "long_used": strat.state.long_used,

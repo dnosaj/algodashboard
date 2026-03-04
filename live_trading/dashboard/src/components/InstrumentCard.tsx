@@ -236,7 +236,7 @@ export function InstrumentCard({ position, data, selected, onSelect }: Instrumen
                 {position.unrealized_pnl >= 0 ? '+' : ''}${position.unrealized_pnl.toFixed(2)}
               </div>
               <div style={{ fontSize: 10, color: '#666', fontFamily: FONT }}>
-                {data?.bars_held ?? 0} bars held
+                {data?.bars_held ?? 0}{data?.breakeven_after_bars ? ` / ${data.breakeven_after_bars}` : ''} bars
                 {data?.max_loss_pts ? ` | SL ${data.max_loss_pts}pt` : ''}
               </div>
             </>
