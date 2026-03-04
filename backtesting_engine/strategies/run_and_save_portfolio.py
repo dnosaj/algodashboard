@@ -40,7 +40,7 @@ from generate_session import (
     # vScalpA params
     VSCALPA_RSI_LEN, VSCALPA_RSI_BUY, VSCALPA_RSI_SELL,
     VSCALPA_SM_THRESHOLD, VSCALPA_COOLDOWN,
-    VSCALPA_MAX_LOSS_PTS, VSCALPA_TP_PTS,
+    VSCALPA_MAX_LOSS_PTS, VSCALPA_TP_PTS, VSCALPA_ENTRY_END_ET,
     # vScalpB params
     VSCALPB_RSI_LEN, VSCALPB_RSI_BUY, VSCALPB_RSI_SELL,
     VSCALPB_SM_THRESHOLD, VSCALPB_COOLDOWN,
@@ -62,7 +62,8 @@ SCRIPT_NAME = "run_and_save_portfolio.py"
 def run_strategy(name, strategy_id, opens, highs, lows, closes, sm, times,
                  rsi_curr, rsi_prev, rsi_buy, rsi_sell, sm_threshold,
                  cooldown, max_loss_pts, tp_pts, dollar_per_pt, commission,
-                 params_dict, data_range, split="FULL", eod_et=None):
+                 params_dict, data_range, split="FULL", eod_et=None,
+                 entry_end_et=None):
     """Run a single strategy and save results."""
     kwargs = dict(
         rsi_buy=rsi_buy, rsi_sell=rsi_sell,
@@ -71,6 +72,8 @@ def run_strategy(name, strategy_id, opens, highs, lows, closes, sm, times,
     )
     if eod_et is not None:
         kwargs["eod_minutes_et"] = eod_et
+    if entry_end_et is not None:
+        kwargs["entry_end_et"] = entry_end_et
 
     trades = run_backtest_tp_exit(
         opens, highs, lows, closes, sm, times,
@@ -189,6 +192,7 @@ def main():
             VSCALPA_COOLDOWN, VSCALPA_MAX_LOSS_PTS, VSCALPA_TP_PTS,
             MNQ_DOLLAR_PER_PT, MNQ_COMMISSION,
             vscalpa_params, dr, split_name,
+            entry_end_et=VSCALPA_ENTRY_END_ET,
         )
 
         # --- vScalpB ---

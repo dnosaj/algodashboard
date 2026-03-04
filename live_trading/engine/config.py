@@ -133,6 +133,7 @@ MNQ_V15 = StrategyConfig(
     max_strategy_daily_loss=100.0,
     vix_death_zone_min=19.0,
     vix_death_zone_max=22.0,
+    session_end_et="13:00",  # Late-day cutoff: entries after 13:00 ET are net negative
 )
 
 MNQ_VSCALPB = StrategyConfig(

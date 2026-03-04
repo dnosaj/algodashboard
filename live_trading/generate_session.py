@@ -51,8 +51,9 @@ VSCALPA_RSI_BUY = 60
 VSCALPA_RSI_SELL = 40
 VSCALPA_SM_THRESHOLD = 0.0
 VSCALPA_COOLDOWN = 20
-VSCALPA_MAX_LOSS_PTS = 50
+VSCALPA_MAX_LOSS_PTS = 40
 VSCALPA_TP_PTS = 5
+VSCALPA_ENTRY_END_ET = 13 * 60  # 13:00 ET — late-day entries are net negative
 
 # vScalpB params
 VSCALPB_RSI_LEN = 8
@@ -87,7 +88,8 @@ def run_backtest_tp_exit(opens, highs, lows, closes, sm, times,
                          rsi_buy, rsi_sell, sm_threshold,
                          cooldown_bars, max_loss_pts, tp_pts,
                          eod_minutes_et=NY_CLOSE_ET,
-                         breakeven_after_bars=0):
+                         breakeven_after_bars=0,
+                         entry_end_et=NY_LAST_ENTRY_ET):
     """v15-style backtest: same entries as v10, but TP exit instead of SM flip.
 
     Exit priority:
@@ -200,7 +202,7 @@ def run_backtest_tp_exit(opens, highs, lows, closes, sm, times,
         # Entries
         if trade_state == 0:
             bars_since = i - exit_bar
-            in_session = NY_OPEN_ET <= bar_mins_et <= NY_LAST_ENTRY_ET
+            in_session = NY_OPEN_ET <= bar_mins_et <= entry_end_et
             cd_ok = bars_since >= cooldown_bars
 
             if in_session and cd_ok:
@@ -377,6 +379,7 @@ def run_session(df_mnq: pd.DataFrame, target_dates: list[str],
         rsi_buy=VSCALPA_RSI_BUY, rsi_sell=VSCALPA_RSI_SELL,
         sm_threshold=VSCALPA_SM_THRESHOLD, cooldown_bars=VSCALPA_COOLDOWN,
         max_loss_pts=VSCALPA_MAX_LOSS_PTS, tp_pts=VSCALPA_TP_PTS,
+        entry_end_et=VSCALPA_ENTRY_END_ET,
     )
     compute_mfe_mae(vscalpa_trades, mnq_highs, mnq_lows)
 
