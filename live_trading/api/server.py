@@ -520,19 +520,72 @@ def create_app(handle: EngineHandle) -> FastAPI:
             })
         return result
 
+    # --- Historical daily P&L cache ---
+    _historical_pnl_cache: dict[str, float] | None = None
+    _historical_pnl_cache_time: float = 0
+    _HISTORICAL_PNL_TTL: float = 300  # 5 minutes
+
+    def _load_historical_daily_pnl() -> dict[str, float]:
+        """Load daily P&L totals from saved session files on disk.
+
+        Scans SESSIONS_DIR for session_YYYY-MM-DD.json files, skipping
+        legacy multi-day files (_to_ pattern) and today's date (live
+        engine data is authoritative for today).
+
+        Returns dict mapping "YYYY-MM-DD" -> daily P&L sum.
+        Cached with 5-minute TTL.
+        """
+        nonlocal _historical_pnl_cache, _historical_pnl_cache_time
+
+        now = time.monotonic()
+        if _historical_pnl_cache is not None and (now - _historical_pnl_cache_time) < _HISTORICAL_PNL_TTL:
+            return _historical_pnl_cache
+
+        from zoneinfo import ZoneInfo
+        today = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
+        daily: dict[str, float] = {}
+
+        for f in SESSIONS_DIR.glob("session_*.json"):
+            # Skip legacy multi-day files (e.g. session_2026-02-13_to_2026-02-18.json)
+            if "_to_" in f.name:
+                continue
+            # Extract date from filename: session_YYYY-MM-DD.json
+            stem = f.stem  # "session_2026-02-28"
+            file_date = stem.replace("session_", "", 1)
+            # Skip today — live engine is authoritative
+            if file_date == today:
+                continue
+            try:
+                data = json.loads(f.read_text())
+                day_pnl = sum(t.get("pnl", 0) for t in data.get("trades", []))
+                daily[file_date] = day_pnl
+            except Exception as e:
+                logger.warning(f"Skipping malformed session file {f.name}: {e}")
+
+        _historical_pnl_cache = daily
+        _historical_pnl_cache_time = now
+        return daily
+
     @app.get("/api/daily_pnl")
     def get_daily_pnl() -> list[dict]:
-        """Get daily P&L breakdown computed from trade history."""
-        trades = handle.get_trades()
-        daily: dict[str, float] = {}
-        for t in trades:
+        """Get daily P&L breakdown from historical sessions + live trades."""
+        from zoneinfo import ZoneInfo
+
+        # Historical days from disk (cached)
+        daily = dict(_load_historical_daily_pnl())
+
+        # Today's trades from live engine (authoritative)
+        today = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
+        today_pnl = 0.0
+        for t in handle.get_trades():
             if t.exit_time is None:
                 continue
             date = t.exit_time.strftime("%Y-%m-%d")
-            if date not in daily:
-                daily[date] = 0.0
-            daily[date] += t.pnl_dollar
+            if date == today:
+                today_pnl += t.pnl_dollar
+        daily[today] = today_pnl
 
+        # Build sorted result with cumulative
         result = []
         cumulative = 0.0
         for date in sorted(daily.keys()):
