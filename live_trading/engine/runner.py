@@ -888,6 +888,96 @@ async def heartbeat_loop(state: EngineState) -> None:
                 })
 
 
+async def snapshot_loop(state: EngineState) -> None:
+    """Capture overnight market structure (morning) and trading results (evening).
+
+    Morning snapshot (9:25 AM ET): computes overnight metrics from backfilled bars.
+    Evening snapshot (4:05 PM ET): fills in the day's trading results.
+    Runs once each per day, checks every 30 seconds.
+    """
+    from engine.overnight_snapshot import (
+        DEFAULT_CSV_PATH,
+        compute_evening_snapshot,
+        compute_morning_snapshot,
+        row_exists_for_date,
+        update_evening_snapshot,
+        write_morning_snapshot,
+    )
+
+    logger.info("[Runner] Overnight snapshot loop started")
+
+    morning_done = False
+    evening_done = False
+    current_date = ""
+    csv_path = DEFAULT_CSV_PATH
+
+    while not state.shutdown_event.is_set():
+        try:
+            await asyncio.wait_for(
+                state.shutdown_event.wait(),
+                timeout=30.0,
+            )
+            break
+        except asyncio.TimeoutError:
+            pass
+
+        now_et = datetime.now(ZoneInfo("America/New_York"))
+        today = now_et.strftime("%Y-%m-%d")
+        now_mins = now_et.hour * 60 + now_et.minute
+
+        # Reset on new day
+        if today != current_date:
+            morning_done = False
+            evening_done = False
+            current_date = today
+            # Skip both snapshots if a row already exists (engine restart)
+            if row_exists_for_date(csv_path, today):
+                logger.info(f"[Snapshot] Row already exists for {today}, skipping (engine restart)")
+                morning_done = True
+                evening_done = True
+
+        # Morning: at/after 9:25 AM ET, run once
+        if not morning_done and now_mins >= 9 * 60 + 25:
+            try:
+                bars = getattr(state.data_feed, '_all_bars', None)
+                if bars is None:
+                    bars = {}
+                vix_close = getattr(state.safety, '_vix_close', None) if state.safety else None
+
+                snapshot = compute_morning_snapshot(
+                    bars_by_instrument=bars,
+                    strategies=state.strategies,
+                    vix_close=vix_close,
+                    csv_path=csv_path,
+                )
+                if snapshot:
+                    write_morning_snapshot(snapshot, csv_path)
+                    logger.info(
+                        f"[Snapshot] Morning: range={snapshot['overnight_range_pts']}pts, "
+                        f"pos={snapshot['position_in_range']}, "
+                        f"SM(MNQ)={snapshot['mnq_sm_value']}, "
+                        f"coverage={snapshot['coverage_hours']}h"
+                    )
+                else:
+                    logger.warning("[Snapshot] Morning snapshot returned None (no bars?)")
+            except Exception as e:
+                logger.error(f"[Snapshot] Morning snapshot error: {e}", exc_info=True)
+            morning_done = True
+
+        # Evening: at/after 4:05 PM ET, run once
+        if not evening_done and now_mins >= 16 * 60 + 5:
+            try:
+                evening = compute_evening_snapshot(state.strategies)
+                update_evening_snapshot(evening, csv_path, today)
+                logger.info(
+                    f"[Snapshot] Evening: P&L=${evening['total_pnl']:.2f}, "
+                    f"trades={evening['trade_count']}, SLs={evening['sl_count']}"
+                )
+            except Exception as e:
+                logger.error(f"[Snapshot] Evening snapshot error: {e}", exc_info=True)
+            evening_done = True
+
+
 def _has_oco_protection(state: EngineState, strategy_id: str) -> bool:
     """Check if a strategy has active (unfilled) OCO brackets resting on exchange.
 
@@ -1485,6 +1575,7 @@ async def run(config: EngineConfig) -> None:
         asyncio.create_task(intra_bar_exit_loop(state), name="intrabar_monitor"),
         asyncio.create_task(reconciliation_loop(state), name="recon"),
         asyncio.create_task(heartbeat_loop(state), name="heartbeat"),
+        asyncio.create_task(snapshot_loop(state), name="snapshot"),
     ]
 
     if uvicorn_server is not None:
