@@ -90,15 +90,30 @@ def run_backtest_tp_exit(opens, highs, lows, closes, sm, times,
                          cooldown_bars, max_loss_pts, tp_pts,
                          eod_minutes_et=NY_CLOSE_ET,
                          breakeven_after_bars=0,
-                         entry_end_et=NY_LAST_ENTRY_ET):
+                         entry_end_et=NY_LAST_ENTRY_ET,
+                         entry_gate=None,
+                         quick_stop_pts=0,
+                         quick_stop_bars=0,
+                         engulf_exit_pts=0,
+                         consec_adverse_bars=0):
     """v15-style backtest: same entries as v10, but TP exit instead of SM flip.
 
     Exit priority:
       1. EOD: eod_minutes_et -> fill at bar close
       2. SL: prev bar close breaches max_loss_pts -> fill at next open
-      3. TP: prev bar close reaches tp_pts profit -> fill at next open
-      4. BE_TIME: bars held >= breakeven_after_bars -> fill at next open (0=disabled)
+      3. Quick Stop: within K bars, adverse > X pts -> fill at next open
+      4. Engulfing Bar: 1st bar after entry engulfs by > X pts -> fill at next open
+      5. Consecutive Adverse: N bars all close against position -> fill at next open
+      6. TP: prev bar close reaches tp_pts profit -> fill at next open
+      7. BE_TIME: bars held >= breakeven_after_bars -> fill at next open (0=disabled)
     No SM flip exit.
+
+    New parameters (all backward-compatible, defaults produce identical results):
+      entry_gate:         np bool array, True=entry allowed. Uses i-1 (prev bar).
+      quick_stop_pts:     Exit if adverse > X pts within first K bars (0=disabled).
+      quick_stop_bars:    Window for quick stop check (0=disabled).
+      engulf_exit_pts:    Exit if 1st bar after entry engulfs by > X pts (0=disabled).
+      consec_adverse_bars: Exit if N consecutive bars close against position (0=disabled).
     """
     n = len(opens)
     trades = []
@@ -110,6 +125,9 @@ def run_backtest_tp_exit(opens, highs, lows, closes, sm, times,
     short_used = False
 
     et_mins = compute_et_minutes(times)
+
+    # Pre-extract opens array for engulfing bar check (closes already available)
+    opens_arr = opens  # alias for clarity in engulf logic
 
     def close_trade(side, entry_p, exit_p, entry_i, exit_i, result):
         pts = (exit_p - entry_p) if side == "long" else (entry_p - exit_p)
@@ -160,6 +178,39 @@ def run_backtest_tp_exit(opens, highs, lows, closes, sm, times,
                 exit_bar = i
                 continue
 
+            # Quick Stop: adverse > X pts within first K bars
+            if quick_stop_pts > 0 and quick_stop_bars > 0:
+                bars_in = i - entry_idx
+                if bars_in <= quick_stop_bars:
+                    if closes[i - 1] <= entry_price - quick_stop_pts:
+                        close_trade("long", entry_price, opens[i], entry_idx, i, "QS")
+                        trade_state = 0
+                        exit_bar = i
+                        continue
+
+            # Engulfing Bar: 1st completed bar after entry fully reverses
+            if engulf_exit_pts > 0 and (i - entry_idx) == 1:
+                bar_body = closes[i - 1] - opens_arr[i - 1]
+                if bar_body < -engulf_exit_pts:
+                    close_trade("long", entry_price, opens[i], entry_idx, i, "ENGULF")
+                    trade_state = 0
+                    exit_bar = i
+                    continue
+
+            # Consecutive Adverse Bars: N bars all close bearish
+            if consec_adverse_bars > 0 and (i - entry_idx) >= consec_adverse_bars:
+                all_adverse = True
+                for k in range(consec_adverse_bars):
+                    idx = i - 1 - k
+                    if closes[idx] >= opens_arr[idx]:
+                        all_adverse = False
+                        break
+                if all_adverse:
+                    close_trade("long", entry_price, opens[i], entry_idx, i, "CONSEC")
+                    trade_state = 0
+                    exit_bar = i
+                    continue
+
             # TP: prev bar close reached TP target
             if tp_pts > 0 and closes[i - 1] >= entry_price + tp_pts:
                 close_trade("long", entry_price, opens[i], entry_idx, i, "TP")
@@ -184,6 +235,39 @@ def run_backtest_tp_exit(opens, highs, lows, closes, sm, times,
                 exit_bar = i
                 continue
 
+            # Quick Stop: adverse > X pts within first K bars
+            if quick_stop_pts > 0 and quick_stop_bars > 0:
+                bars_in = i - entry_idx
+                if bars_in <= quick_stop_bars:
+                    if closes[i - 1] >= entry_price + quick_stop_pts:
+                        close_trade("short", entry_price, opens[i], entry_idx, i, "QS")
+                        trade_state = 0
+                        exit_bar = i
+                        continue
+
+            # Engulfing Bar: 1st completed bar after entry fully reverses
+            if engulf_exit_pts > 0 and (i - entry_idx) == 1:
+                bar_body = closes[i - 1] - opens_arr[i - 1]
+                if bar_body > engulf_exit_pts:
+                    close_trade("short", entry_price, opens[i], entry_idx, i, "ENGULF")
+                    trade_state = 0
+                    exit_bar = i
+                    continue
+
+            # Consecutive Adverse Bars: N bars all close bullish
+            if consec_adverse_bars > 0 and (i - entry_idx) >= consec_adverse_bars:
+                all_adverse = True
+                for k in range(consec_adverse_bars):
+                    idx = i - 1 - k
+                    if closes[idx] <= opens_arr[idx]:
+                        all_adverse = False
+                        break
+                if all_adverse:
+                    close_trade("short", entry_price, opens[i], entry_idx, i, "CONSEC")
+                    trade_state = 0
+                    exit_bar = i
+                    continue
+
             # TP
             if tp_pts > 0 and closes[i - 1] <= entry_price - tp_pts:
                 close_trade("short", entry_price, opens[i], entry_idx, i, "TP")
@@ -205,8 +289,9 @@ def run_backtest_tp_exit(opens, highs, lows, closes, sm, times,
             bars_since = i - exit_bar
             in_session = NY_OPEN_ET <= bar_mins_et <= entry_end_et
             cd_ok = bars_since >= cooldown_bars
+            gate_ok = entry_gate is None or entry_gate[i - 1]
 
-            if in_session and cd_ok:
+            if in_session and cd_ok and gate_ok:
                 if sm_bull and rsi_long_trigger and not long_used:
                     trade_state = 1
                     entry_price = opens[i]

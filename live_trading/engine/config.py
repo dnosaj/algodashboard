@@ -150,8 +150,6 @@ MNQ_VSCALPB = StrategyConfig(
     cooldown=20, max_loss_pts=15,  # Tight stop: wrong fast = out fast
     dollar_per_pt=2.0,
     max_strategy_daily_loss=100.0,
-    vix_death_zone_min=19.0,
-    vix_death_zone_max=22.0,
 )
 
 # MES v9.4 -- REPLACED by MES_V2 (TP=20 exit). Kept for reference.

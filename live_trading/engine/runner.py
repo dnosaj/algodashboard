@@ -307,6 +307,10 @@ class EngineState:
     intrabar_monitor_active: bool = False
     # Reason for the last emergency flatten (used for auto-recovery logic)
     _flatten_reason: str = ""
+    # tastytrade session for VIX gate and other API calls (None in mock mode)
+    tt_session: Optional[object] = None
+    # Background task reference to prevent GC (e.g. VIX re-fetch)
+    _vix_refetch_task: Optional[asyncio.Task] = None
 
 
 # ---------------------------------------------------------------------------
@@ -739,10 +743,15 @@ def _check_daily_reset(bar: Bar, state: EngineState) -> None:
         # 4. Reset safety counters + strategy daily state (clears strat.trades)
         if state.safety:
             state.safety.reset_daily()
-            # Re-fetch VIX for new trading day
-            from engine.vix_gate import fetch_prior_day_vix_close
-            vix_close = fetch_prior_day_vix_close()
-            state.safety.set_vix_close(vix_close)
+            # Re-fetch VIX for new trading day (async — schedule as background task)
+            async def _refetch_vix():
+                try:
+                    from engine.vix_gate import fetch_prior_day_vix_close
+                    vix_close = await fetch_prior_day_vix_close(session=state.tt_session)
+                    state.safety.set_vix_close(vix_close)
+                except Exception as e:
+                    logger.error(f"[Runner] VIX re-fetch failed: {e}")
+            state._vix_refetch_task = asyncio.create_task(_refetch_vix())
         for strat in state.strategies.values():
             strat.reset_daily()
 
@@ -1385,6 +1394,7 @@ async def run(config: EngineConfig) -> None:
             config.tastytrade.refresh_token,
             is_test=config.tastytrade.is_sandbox,
         )
+        state.tt_session = tt_session
         # Re-suppress after SDK init (SDK may reconfigure loggers)
         for noisy in ("tastytrade", "httpx", "httpcore", "websockets"):
             lg = logging.getLogger(noisy)
@@ -1459,7 +1469,7 @@ async def run(config: EngineConfig) -> None:
 
     # Fetch prior-day VIX close for death zone gating
     from engine.vix_gate import fetch_prior_day_vix_close
-    vix_close = fetch_prior_day_vix_close()
+    vix_close = await fetch_prior_day_vix_close(session=state.tt_session)
     state.safety.set_vix_close(vix_close)
 
     # Register safety with event bus (only via event bus, no direct calls)
