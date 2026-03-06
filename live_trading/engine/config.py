@@ -45,7 +45,7 @@ class StrategyConfig:
 @dataclass
 class SafetyConfig:
     """Safety limits and circuit breakers."""
-    max_daily_loss: float = 500.0     # Max daily loss in dollars before halt
+    max_daily_loss: float = 600.0     # Max daily loss in dollars before halt
     max_position_size: int = 5        # Max contracts per instrument
     max_consecutive_losses: int = 5   # Consecutive losses before pause
     heartbeat_timeout_sec: int = 90   # Alert if no data for this long (polls every 60s)
@@ -181,7 +181,7 @@ MES_V2 = StrategyConfig(
     partial_tp_pts=10,     # TP1: close 1 contract at +10 pts ($50)
     partial_qty=1,         # Close 1 of 2 at TP1
     breakeven_after_bars=75,   # Close stale trades after 75 bars (~1h15m)
-    max_strategy_daily_loss=200.0,
+    max_strategy_daily_loss=400.0,    # One 2-contract SL is ~$355; $400 allows recovery
     session_close_et="15:30",  # EOD 15:30 ET validated for MES
 )
 

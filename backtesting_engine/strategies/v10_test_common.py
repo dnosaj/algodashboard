@@ -67,21 +67,16 @@ def compute_et_minutes(times):
 def load_instrument_1min(instrument: str) -> pd.DataFrame:
     """Load 1-min data for an instrument. Returns DF with standard columns.
 
-    Prefers Databento files (6-month, real volume, computed SM) when available.
+    Prefers Databento files (concatenates all available) when available.
     Falls back to AlgoAlpha TradingView exports.
 
     Columns returned: Open, High, Low, Close, SM_Net
     Plus VWAP, Volume if available.
     """
-    # Prefer Databento data (6-month with real volume)
-    DATABENTO_FILES = {
-        'MNQ': 'databento_MNQ_1min_2025-08-17_to_2026-02-13.csv',
-        'MES': 'databento_MES_1min_2025-08-17_to_2026-02-13.csv',
-    }
-    if instrument in DATABENTO_FILES:
-        db_path = DATA_DIR / DATABENTO_FILES[instrument]
-        if db_path.exists():
-            return load_databento_1min(instrument)
+    # Prefer Databento data (concatenates all available files)
+    db_files = sorted(DATA_DIR.glob(f"databento_{instrument}_1min_*.csv"))
+    if db_files:
+        return load_databento_1min(instrument)
 
     # Fall back to AlgoAlpha TradingView exports
     cfg = INSTRUMENTS[instrument]
@@ -107,20 +102,19 @@ def load_instrument_1min(instrument: str) -> pd.DataFrame:
 def load_databento_1min(instrument: str) -> pd.DataFrame:
     """Load 1-min Databento data (has real OHLCV + computed VWAP, no SM).
 
-    Computes SM Net Index from closes + real volume using compute_smart_money().
-    Uses AlgoAlpha SM params (20, 12, 400, 255) matching TradingView settings.
+    Concatenates ALL available databento_{instrument}_1min_*.csv files,
+    deduplicates by timestamp, and computes SM Net Index from real volume.
 
     Columns returned: Open, High, Low, Close, Volume, VWAP, SM_Net
     """
-    DATABENTO_FILES = {
-        'MNQ': 'databento_MNQ_1min_2025-08-17_to_2026-02-13.csv',
-        'MES': 'databento_MES_1min_2025-08-17_to_2026-02-13.csv',
-    }
-    if instrument not in DATABENTO_FILES:
-        raise ValueError(f"No Databento file for {instrument}. Available: {list(DATABENTO_FILES.keys())}")
+    files = sorted(DATA_DIR.glob(f"databento_{instrument}_1min_*.csv"))
+    if not files:
+        raise ValueError(f"No Databento files for {instrument} in {DATA_DIR}")
 
-    filepath = DATA_DIR / DATABENTO_FILES[instrument]
-    df = pd.read_csv(filepath)
+    dfs = []
+    for f in files:
+        dfs.append(pd.read_csv(f))
+    df = pd.concat(dfs, ignore_index=True)
 
     result = pd.DataFrame()
     result['Time'] = pd.to_datetime(df['time'].astype(int), unit='s')
@@ -132,6 +126,8 @@ def load_databento_1min(instrument: str) -> pd.DataFrame:
     result['VWAP'] = pd.to_numeric(df['VWAP'], errors='coerce')
 
     result = result.set_index('Time')
+    result = result[~result.index.duplicated(keep='first')]
+    result = result.sort_index()
 
     # Compute SM from real volume using actual TradingView settings (20, 12, 400, 255)
     sm = compute_smart_money(
