@@ -239,6 +239,7 @@ class EventBridge:
         event_bus.subscribe("trade_corrected", self._on_trade_corrected)
         event_bus.subscribe("fill", self._on_fill)
         event_bus.subscribe("status_change", self._on_status_change)
+        event_bus.subscribe("signal_blocked", self._on_signal_blocked)
         event_bus.subscribe("error", self._on_error)
 
     def start(self) -> None:
@@ -354,6 +355,21 @@ class EventBridge:
             "bars_held": trade.bars_held,
             "qty": trade.qty,
             "is_partial": trade.is_partial,
+        })
+
+    def _on_signal_blocked(self, payload: dict) -> None:
+        from zoneinfo import ZoneInfo
+        _ET = ZoneInfo("America/New_York")
+        ts = payload["time"]
+        et = ts.astimezone(_ET)
+        offset_seconds = int(et.utcoffset().total_seconds())
+        self._enqueue("signal_blocked", {
+            "instrument": payload["instrument"],
+            "strategy_id": payload["strategy_id"],
+            "side": payload["side"],
+            "price": payload["price"],
+            "time": int(ts.timestamp()) + offset_seconds,
+            "reason": payload["reason"],
         })
 
     def _on_fill(self, fill: dict) -> None:

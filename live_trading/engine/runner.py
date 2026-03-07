@@ -315,19 +315,20 @@ class EngineState:
 # VIX gate phantom signal logging
 # ---------------------------------------------------------------------------
 
-def _log_vix_blocked_signal(
+def _log_blocked_signal(
     state: 'EngineState', bar: Bar, sig: Signal, sid: str, side: str, reason: str,
 ) -> None:
     """Append a blocked signal to CSV for post-hoc 'would have entered' analysis.
 
-    Writes to logs/vix_blocked_signals.csv. Does not touch trades, stats, or UI.
+    Writes to logs/blocked_signals.csv. The 'reason' column distinguishes gate types
+    (VIX death zone, Leledc exhaustion, prior-day level, etc.).
     """
     import csv
     from pathlib import Path
 
     log_dir = Path(state.config.log_dir)
     log_dir.mkdir(parents=True, exist_ok=True)
-    csv_path = log_dir / "vix_blocked_signals.csv"
+    csv_path = log_dir / "blocked_signals.csv"
 
     write_header = not csv_path.exists()
     try:
@@ -339,13 +340,13 @@ def _log_vix_blocked_signal(
                     "price", "sm_value", "rsi_value", "reason",
                 ])
             writer.writerow([
-                bar.time.isoformat() if hasattr(bar.time, 'isoformat') else str(bar.time),
+                bar.timestamp.isoformat(),
                 sid, bar.instrument, side,
                 f"{bar.close:.2f}", f"{sig.sm_value:.4f}", f"{sig.rsi_value:.2f}",
                 reason,
             ])
     except Exception as e:
-        logger.warning(f"[Runner] Failed to log VIX blocked signal: {e}")
+        logger.warning(f"[Runner] Failed to log blocked signal: {e}")
 
 
 # ---------------------------------------------------------------------------
@@ -472,9 +473,15 @@ async def process_bar(
             )
             if not ok:
                 logger.warning(f"[Runner] Trade blocked by safety for {sid}: {reason}")
-                # Log phantom signal for VIX gate analysis
-                if "VIX death zone" in reason:
-                    _log_vix_blocked_signal(state, bar, sig, sid, side, reason)
+                _log_blocked_signal(state, bar, sig, sid, side, reason)
+                state.event_bus.emit("signal_blocked", {
+                    "instrument": bar.instrument,
+                    "strategy_id": sid,
+                    "side": side,
+                    "price": bar.close,
+                    "time": bar.timestamp,
+                    "reason": reason,
+                })
                 strategy.reject_entry()
                 return
 
@@ -1536,6 +1543,8 @@ async def run(config: EngineConfig) -> None:
         for bar in warmup_bars_data:
             for strat in strats_for_inst:
                 strat.warmup(bar)
+            if state.safety:
+                state.safety.on_bar(bar)
         for strat in strats_for_inst:
             strat.start_trading()
         logger.info(f"  {inst}: warmup complete ({len(warmup_bars_data)} bars, "

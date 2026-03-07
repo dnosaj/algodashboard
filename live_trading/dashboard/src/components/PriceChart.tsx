@@ -2,17 +2,20 @@ import { useEffect, useRef, useMemo, useState, useCallback } from 'react';
 import { createChart, ColorType } from 'lightweight-charts';
 import type {
   IChartApi,
+  IPriceLine,
   ISeriesApi,
   SeriesMarker,
   Time,
 } from 'lightweight-charts';
-import type { BarData, Trade, SessionInfo, SessionData } from '../types';
+import type { BarData, BlockedSignal, Trade, SafetyStatusData, SessionInfo, SessionData } from '../types';
 import { SessionTradeList } from './SessionTradeList';
 
 interface PriceChartProps {
   bars: BarData[];
   trades: Trade[];
   instrument: string;
+  safetyStatus: SafetyStatusData | null;
+  blockedSignals: BlockedSignal[];
 }
 
 const FONT = "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace";
@@ -56,11 +59,12 @@ const btnStyle = (active?: boolean): React.CSSProperties => ({
   letterSpacing: 0.5,
 });
 
-export function PriceChart({ bars, trades, instrument }: PriceChartProps) {
+export function PriceChart({ bars, trades, instrument, safetyStatus, blockedSignals }: PriceChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
   const prevBarsLenRef = useRef(0);
+  const priceLineRefs = useRef<IPriceLine[]>([]);
 
   // Session state
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
@@ -320,16 +324,78 @@ export function PriceChart({ bars, trades, instrument }: PriceChartProps) {
       }
     }
 
+    // Blocked signal markers (semi-transparent squares with gate label)
+    for (const blocked of blockedSignals) {
+      if (blocked.instrument !== instrument) continue;
+      const t = snapToBar(Math.floor(blocked.time / 60) * 60) as unknown as Time;
+      const isLong = blocked.side === 'BUY';
+
+      let color = '#ffffff44';
+      if (blocked.reason.includes('Leledc')) color = '#ff880044';
+      else if (blocked.reason.includes('prior-day')) color = '#8888cc44';
+      else if (blocked.reason.includes('VIX')) color = '#ffaa0044';
+
+      let label = 'X';
+      if (blocked.reason.includes('Leledc')) label = 'LEL';
+      else if (blocked.reason.includes('prior-day')) label = 'LVL';
+      else if (blocked.reason.includes('VIX')) label = 'VIX';
+      else if (blocked.reason.includes('daily loss')) label = 'DD';
+
+      mkrs.push({
+        time: t,
+        position: isLong ? 'belowBar' : 'aboveBar',
+        color,
+        shape: 'square',
+        text: label,
+      });
+    }
+
     // Lightweight Charts requires markers sorted by time
     mkrs.sort((a, b) => (a.time as number) - (b.time as number));
     return mkrs;
-  }, [activeTrades, activeBars]);
+  }, [activeTrades, activeBars, blockedSignals, instrument]);
 
   // Apply markers to series
   useEffect(() => {
     if (!seriesRef.current) return;
     seriesRef.current.setMarkers(markers);
   }, [markers]);
+
+  // Prior-day level lines (MES only)
+  useEffect(() => {
+    if (!seriesRef.current || instrument !== 'MES') return;
+    const levels = safetyStatus?.prior_day_levels?.['MES'];
+
+    // Remove old lines
+    for (const line of priceLineRefs.current) {
+      try { seriesRef.current.removePriceLine(line); } catch { /* already removed */ }
+    }
+    priceLineRefs.current = [];
+
+    if (!levels) return;
+
+    const levelDefs = [
+      { key: 'high' as const, color: '#ff666688', label: 'PD H' },
+      { key: 'low' as const, color: '#66ff6688', label: 'PD L' },
+      { key: 'vpoc' as const, color: '#ffaa0088', label: 'VPOC' },
+      { key: 'vah' as const, color: '#8888cc66', label: 'VAH' },
+      { key: 'val' as const, color: '#8888cc66', label: 'VAL' },
+    ];
+    for (const { key, color, label } of levelDefs) {
+      const price = levels[key];
+      if (price != null) {
+        const line = seriesRef.current.createPriceLine({
+          price,
+          color,
+          lineWidth: 1,
+          lineStyle: 2,
+          title: label,
+          axisLabelVisible: true,
+        });
+        priceLineRefs.current.push(line);
+      }
+    }
+  }, [safetyStatus?.prior_day_levels, instrument]);
 
   return (
     <div

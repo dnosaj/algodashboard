@@ -13,7 +13,7 @@ const WS_URL = `ws://${window.location.hostname}:${window.location.port || '8000
 const FONT = "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace";
 
 function App() {
-  const { status, trades, dailyPnl, signals, bars, connected, sendCommand } =
+  const { status, trades, dailyPnl, signals, blockedSignals, bars, connected, sendCommand } =
     useWebSocket(WS_URL);
 
   const [selectedInstrument, setSelectedInstrument] = useState<string>('MNQ');
@@ -92,6 +92,8 @@ function App() {
             bars={chartBars}
             trades={chartTrades}
             instrument={selectedInstrument}
+            safetyStatus={safetyStatus}
+            blockedSignals={blockedSignals}
           />
         </div>
       )}

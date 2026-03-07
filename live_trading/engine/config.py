@@ -37,6 +37,8 @@ class StrategyConfig:
     max_strategy_daily_loss: float = 0.0  # Max daily loss per strategy (0 = disabled)
     vix_death_zone_min: float = 0.0   # VIX death zone lower bound (0 = disabled)
     vix_death_zone_max: float = 0.0   # VIX death zone upper bound (0 = disabled)
+    leledc_maj_qual: int = 0            # Leledc exhaustion threshold (0 = disabled)
+    prior_day_level_buffer: float = 0.0 # Block within N pts of prior-day levels (0 = disabled)
     session_start_et: str = "10:00"   # RTH start (Eastern Time)
     session_end_et: str = "15:45"     # Last entry allowed
     session_close_et: str = "16:00"   # Force close all positions
@@ -134,6 +136,7 @@ MNQ_V15 = StrategyConfig(
     max_strategy_daily_loss=100.0,
     vix_death_zone_min=19.0,
     vix_death_zone_max=22.0,
+    leledc_maj_qual=9,  # Block entry on Leledc exhaustion (9+ consecutive directional closes)
     session_end_et="13:00",  # Late-day cutoff: entries after 13:00 ET are net negative
 )
 
@@ -150,6 +153,7 @@ MNQ_VSCALPB = StrategyConfig(
     cooldown=20, max_loss_pts=15,  # Tight stop: wrong fast = out fast
     dollar_per_pt=2.0,
     max_strategy_daily_loss=100.0,
+    leledc_maj_qual=9,  # Block entry on Leledc exhaustion (9+ consecutive directional closes)
 )
 
 # MES v9.4 -- REPLACED by MES_V2 (TP=20 exit). Kept for reference.
@@ -182,6 +186,7 @@ MES_V2 = StrategyConfig(
     partial_qty=1,         # Close 1 of 2 at TP1
     breakeven_after_bars=75,   # Close stale trades after 75 bars (~1h15m)
     max_strategy_daily_loss=400.0,    # One 2-contract SL is ~$355; $400 allows recovery
+    prior_day_level_buffer=5.0,  # Block within 5 pts of prior-day H/L/VPOC/VAH/VAL
     session_close_et="15:30",  # EOD 15:30 ET validated for MES
 )
 

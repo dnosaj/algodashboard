@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import type {
   BarData,
+  BlockedSignal,
   ConnectionStatus,
   SafetyStatusData,
   StatusData,
@@ -15,6 +16,7 @@ interface UseWebSocketReturn {
   trades: Trade[];
   dailyPnl: DailyPnLEntry[];
   signals: SignalEvent[];
+  blockedSignals: BlockedSignal[];
   bars: Record<string, BarData[]>;
   connected: ConnectionStatus;
   sendCommand: (command: string, payload?: Record<string, unknown>) => void;
@@ -31,6 +33,7 @@ export function useWebSocket(url: string): UseWebSocketReturn {
   const [trades, setTrades] = useState<Trade[]>([]);
   const [dailyPnl, setDailyPnl] = useState<DailyPnLEntry[]>([]);
   const [signals, setSignals] = useState<SignalEvent[]>([]);
+  const [blockedSignals, setBlockedSignals] = useState<BlockedSignal[]>([]);
   const [bars, setBars] = useState<Record<string, BarData[]>>({});
 
   const wsRef = useRef<WebSocket | null>(null);
@@ -119,6 +122,12 @@ export function useWebSocket(url: string): UseWebSocketReturn {
                   : t
               )
             );
+            break;
+          }
+
+          case 'signal_blocked': {
+            const blocked = message.data as unknown as BlockedSignal;
+            setBlockedSignals((prev) => [blocked, ...prev].slice(0, 200));
             break;
           }
 
@@ -229,7 +238,16 @@ export function useWebSocket(url: string): UseWebSocketReturn {
         const res = await fetch('/api/trades');
         if (res.ok) {
           const data = await res.json();
-          if (mountedRef.current) setTrades(data || []);
+          if (mountedRef.current) {
+            setTrades((prev) => {
+              const next = data || [];
+              // Daily reset: trades shrank → clear stale blocked signals
+              if (next.length < prev.length) {
+                setBlockedSignals([]);
+              }
+              return next;
+            });
+          }
         }
       } catch {
         // Ignore
@@ -280,6 +298,7 @@ export function useWebSocket(url: string): UseWebSocketReturn {
     trades,
     dailyPnl,
     signals,
+    blockedSignals,
     bars,
     connected: connectionStatus,
     sendCommand,

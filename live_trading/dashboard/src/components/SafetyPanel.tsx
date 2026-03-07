@@ -198,7 +198,7 @@ export function SafetyPanel({ safety, positions, sendCommand }: SafetyPanelProps
               {s.strategy_id}
             </span>
 
-            {/* Status badge: PAUSED > VIX GATE > ACTIVE */}
+            {/* Status badge: PAUSED > VIX GATE > LELEDC > LEVEL > ACTIVE */}
             {s.paused ? (
               <PausedBadge paused={true} />
             ) : s.vix_gated ? (
@@ -209,6 +209,24 @@ export function SafetyPanel({ safety, positions, sendCommand }: SafetyPanelProps
                 color: '#ffaa00',
               }}>
                 VIX GATE
+              </span>
+            ) : s.leledc_gated ? (
+              <span style={{
+                fontSize: 10, fontWeight: 600, fontFamily: FONT,
+                padding: '2px 6px', borderRadius: 3,
+                backgroundColor: 'rgba(255,136,0,0.12)',
+                color: '#ff8800',
+              }}>
+                LELEDC
+              </span>
+            ) : s.prior_day_gated ? (
+              <span style={{
+                fontSize: 10, fontWeight: 600, fontFamily: FONT,
+                padding: '2px 6px', borderRadius: 3,
+                backgroundColor: 'rgba(136,136,204,0.12)',
+                color: '#8888cc',
+              }}>
+                LEVEL
               </span>
             ) : (
               <PausedBadge paused={false} />

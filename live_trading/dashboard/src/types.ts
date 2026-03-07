@@ -85,7 +85,7 @@ export interface SignalEvent {
 }
 
 export interface WSMessage {
-  type: 'bar' | 'signal' | 'trade' | 'trade_update' | 'status' | 'safety_status' | 'fill' | 'error';
+  type: 'bar' | 'signal' | 'signal_blocked' | 'trade' | 'trade_update' | 'status' | 'safety_status' | 'fill' | 'error';
   data: Record<string, unknown>;
   ts: string;
 }
@@ -122,6 +122,8 @@ export interface SafetyStrategyStatus {
   trade_count_today: number;
   daily_pnl: number;
   vix_gated: boolean;
+  leledc_gated: boolean;
+  prior_day_gated: boolean;
 }
 
 export interface SafetyStatusData {
@@ -138,7 +140,23 @@ export interface SafetyStatusData {
   extended_pause: boolean;
   extended_pause_reason: string;
   rolling_sl_5d: number;
+  prior_day_levels: Record<string, {
+    high: number | null;
+    low: number | null;
+    vpoc: number | null;
+    vah: number | null;
+    val: number | null;
+  }>;
   strategies: Record<string, SafetyStrategyStatus>;
+}
+
+export interface BlockedSignal {
+  instrument: string;
+  strategy_id: string;
+  side: string;
+  price: number;
+  time: number;
+  reason: string;
 }
 
 export type ConnectionStatus = 'connected' | 'disconnected' | 'reconnecting';

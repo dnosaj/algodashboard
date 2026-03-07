@@ -11,14 +11,18 @@ Replaces the inline SafetyManager from runner.py with:
 """
 
 import logging
+import math
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 from engine.config import EngineConfig, StrategyConfig
 from engine.events import Bar, EventBus, TradeRecord
 
 logger = logging.getLogger(__name__)
+
+_ET = ZoneInfo("America/New_York")
 
 
 @dataclass
@@ -87,13 +91,242 @@ class SafetyManager:
         # VIX death zone gating
         self._vix_close: float | None = None
 
+        # Gate deduplication: on_bar is called multiple times per bar (direct +
+        # per-strategy event bus). Gate updates must only run ONCE per unique bar.
+        self._last_gate_bar: dict[str, tuple] = {}
+
+        # Leledc exhaustion gate (per instrument)
+        self._leledc_closes: dict[str, list] = {}
+        self._leledc_bull_count: dict[str, int] = {}
+        self._leledc_bear_count: dict[str, int] = {}
+        self._leledc_gate_prev: dict[str, bool] = {}
+        self._leledc_gate_current: dict[str, bool] = {}
+        self._leledc_thresholds: dict[str, int] = {}  # min maj_qual per instrument
+        for s in config.strategies:
+            if s.leledc_maj_qual > 0:
+                inst = s.instrument
+                if inst not in self._leledc_thresholds or s.leledc_maj_qual < self._leledc_thresholds[inst]:
+                    self._leledc_thresholds[inst] = s.leledc_maj_qual
+
+        # Prior-day level gate (per instrument)
+        self._prior_day_levels: dict[str, dict] = {}   # inst -> {high, low, vpoc, vah, val}
+        self._current_rth: dict[str, dict] = {}        # inst -> {date, high, low, closes, volumes}
+        self._prior_day_gate_prev: dict[str, bool] = {}
+        self._prior_day_gate_current: dict[str, bool] = {}
+        self._prior_day_buffers: dict[str, float] = {}
+        for s in config.strategies:
+            if s.prior_day_level_buffer > 0:
+                self._prior_day_buffers[s.instrument] = s.prior_day_level_buffer
+
     # ------------------------------------------------------------------
     # Event bus handlers (registered externally)
     # ------------------------------------------------------------------
 
     def on_bar(self, bar: Bar) -> None:
-        """Track per-instrument heartbeat."""
+        """Track heartbeat + update entry gate state (deduplicated).
+
+        Called multiple times per bar (direct from runner + per-strategy event bus).
+        Heartbeat always updates; gate logic runs once per unique bar per instrument.
+        """
         self._last_bar_time[bar.instrument] = datetime.now(timezone.utc)
+
+        # Gate updates: process each bar ONCE per instrument
+        inst = bar.instrument
+        bar_key = (inst, bar.timestamp)
+        if bar_key == self._last_gate_bar.get(inst):
+            return
+        self._last_gate_bar[inst] = bar_key
+
+        # Swap prev ← current BEFORE updating current
+        self._leledc_gate_prev[inst] = self._leledc_gate_current.get(inst, True)
+        self._prior_day_gate_prev[inst] = self._prior_day_gate_current.get(inst, True)
+
+        self._update_leledc(bar)
+        self._update_prior_day_tracking(bar)
+
+    # ------------------------------------------------------------------
+    # Entry gate update methods (called from on_bar, deduplicated)
+    # ------------------------------------------------------------------
+
+    _LELEDC_LOOKBACK = 4
+
+    def _update_leledc(self, bar: Bar) -> None:
+        """Incremental Leledc exhaustion gate update.
+
+        Persistence=1: gate is False on the exhaustion bar itself, True when
+        the streak breaks. Matches build_leledc_gate(persistence=1) from backtest.
+        Counter does NOT reset at daily boundary (matches backtest behavior).
+        """
+        inst = bar.instrument
+        threshold = self._leledc_thresholds.get(inst)
+        if threshold is None:
+            return
+
+        if inst not in self._leledc_closes:
+            self._leledc_closes[inst] = []
+            self._leledc_bull_count[inst] = 0
+            self._leledc_bear_count[inst] = 0
+
+        closes = self._leledc_closes[inst]
+        closes.append(bar.close)
+        if len(closes) > 20:
+            closes[:] = closes[-20:]
+
+        if len(closes) <= self._LELEDC_LOOKBACK:
+            self._leledc_gate_current[inst] = True
+            return
+
+        curr = closes[-1]
+        prev = closes[-(1 + self._LELEDC_LOOKBACK)]
+
+        self._leledc_bull_count[inst] = (self._leledc_bull_count[inst] + 1) if curr > prev else 0
+        self._leledc_bear_count[inst] = (self._leledc_bear_count[inst] + 1) if curr < prev else 0
+
+        exhausted = (self._leledc_bull_count[inst] >= threshold
+                     or self._leledc_bear_count[inst] >= threshold)
+        self._leledc_gate_current[inst] = not exhausted
+
+    # RTH window: 10:00 ET (600 mins) to 16:00 ET (960 mins)
+    _RTH_OPEN_ET = 600
+    _RTH_CLOSE_ET = 960
+
+    def _update_prior_day_tracking(self, bar: Bar) -> None:
+        """Track RTH bars incrementally and compute proximity gate.
+
+        On calendar date change, finalizes prior-day levels (H/L + volume profile).
+        Gate checks proximity of current close to all prior-day levels.
+        """
+        inst = bar.instrument
+        if inst not in self._prior_day_buffers:
+            return
+
+        buffer = self._prior_day_buffers[inst]
+        bar_et = bar.timestamp.astimezone(_ET)
+        et_mins = bar_et.hour * 60 + bar_et.minute
+        bar_date = bar_et.date()
+
+        if inst not in self._current_rth:
+            self._current_rth[inst] = {"date": None, "high": None, "low": None,
+                                        "closes": [], "volumes": []}
+        rth = self._current_rth[inst]
+
+        # New calendar date → finalize previous day's levels
+        if rth["date"] is not None and bar_date != rth["date"]:
+            self._finalize_prior_day(inst)
+        rth["date"] = bar_date
+
+        # Collect RTH bars (10:00-16:00 ET)
+        if self._RTH_OPEN_ET <= et_mins < self._RTH_CLOSE_ET:
+            if rth["high"] is None:
+                rth["high"] = bar.high
+                rth["low"] = bar.low
+            else:
+                rth["high"] = max(rth["high"], bar.high)
+                rth["low"] = min(rth["low"], bar.low)
+            rth["closes"].append(bar.close)
+            rth["volumes"].append(bar.volume)
+
+        # Proximity gate vs prior-day levels
+        levels = self._prior_day_levels.get(inst)
+        if not levels:
+            self._prior_day_gate_current[inst] = True
+            return
+
+        for key in ("high", "low", "vpoc", "vah", "val"):
+            lvl = levels.get(key)
+            if lvl is not None and abs(bar.close - lvl) <= buffer:
+                self._prior_day_gate_current[inst] = False
+                return
+        self._prior_day_gate_current[inst] = True
+
+    def _finalize_prior_day(self, inst: str) -> None:
+        """Compute prior-day levels from collected RTH data and reset tracking."""
+        rth = self._current_rth[inst]
+        if rth["high"] is None:
+            # No RTH bars collected — keep previous levels
+            return
+
+        levels: dict = {"high": rth["high"], "low": rth["low"],
+                        "vpoc": None, "vah": None, "val": None}
+
+        # Compute volume profile (VPOC, VAH, VAL)
+        if rth["closes"] and rth["volumes"]:
+            profile = self._compute_value_area(rth["closes"], rth["volumes"], bin_width=5.0)
+            if profile is not None:
+                levels["vpoc"], levels["vah"], levels["val"] = profile
+
+        self._prior_day_levels[inst] = levels
+        logger.info(
+            f"[Safety] Prior-day levels for {inst}: "
+            f"H={levels['high']:.2f} L={levels['low']:.2f} "
+            f"VPOC={levels.get('vpoc', '?')} VAH={levels.get('vah', '?')} VAL={levels.get('val', '?')}"
+        )
+
+        # Reset tracking for new day
+        rth["high"] = None
+        rth["low"] = None
+        rth["closes"] = []
+        rth["volumes"] = []
+
+    @staticmethod
+    def _compute_value_area(day_closes: list, day_volumes: list, bin_width: float):
+        """Compute VPOC, VAH, VAL from a single day's closes and volumes.
+
+        Direct port from sr_prior_day_levels_sweep.py backtest.
+        Returns (vpoc_price, vah_price, val_price) or None if no data.
+        """
+        if not day_closes:
+            return None
+
+        total_vol = sum(day_volumes)
+        if total_vol <= 0:
+            return None
+
+        # Bin prices
+        price_min = math.floor(min(day_closes) / bin_width) * bin_width
+        price_max = math.ceil(max(day_closes) / bin_width) * bin_width
+        if price_min == price_max:
+            price_max = price_min + bin_width
+
+        n_bins = int(round((price_max - price_min) / bin_width)) + 1
+        bin_volumes = [0.0] * n_bins
+
+        for c, v in zip(day_closes, day_volumes):
+            idx = int(round((c - price_min) / bin_width))
+            idx = min(max(idx, 0), n_bins - 1)
+            bin_volumes[idx] += v
+
+        # VPOC = bin with max volume
+        vpoc_idx = max(range(n_bins), key=lambda i: bin_volumes[i])
+        vpoc_price = price_min + vpoc_idx * bin_width
+
+        # Value area: expand from VPOC until 70% of volume captured
+        va_target = total_vol * 0.70
+        va_vol = bin_volumes[vpoc_idx]
+        lo_idx = vpoc_idx
+        hi_idx = vpoc_idx
+
+        while va_vol < va_target:
+            can_go_lo = lo_idx > 0
+            can_go_hi = hi_idx < n_bins - 1
+
+            if not can_go_lo and not can_go_hi:
+                break
+
+            lo_vol = bin_volumes[lo_idx - 1] if can_go_lo else -1.0
+            hi_vol = bin_volumes[hi_idx + 1] if can_go_hi else -1.0
+
+            if lo_vol >= hi_vol:
+                lo_idx -= 1
+                va_vol += bin_volumes[lo_idx]
+            else:
+                hi_idx += 1
+                va_vol += bin_volumes[hi_idx]
+
+        val_price = price_min + lo_idx * bin_width
+        vah_price = price_min + hi_idx * bin_width
+
+        return vpoc_price, vah_price, val_price
 
     def on_trade_closed(self, trade: TradeRecord) -> None:
         """Update per-strategy and global stats after a trade closes."""
@@ -251,6 +484,32 @@ class SafetyManager:
                         return False, (
                             f"VIX death zone: VIX {self._vix_close:.1f} "
                             f"in [{cfg.vix_death_zone_min}-{cfg.vix_death_zone_max}]"
+                        )
+
+        # Leledc exhaustion gate
+        if strategy_id:
+            cfg = self._strategy_configs.get(strategy_id)
+            if cfg and cfg.leledc_maj_qual > 0:
+                strat = self._strategies.get(strategy_id)
+                if strat and not strat.manual_override:
+                    if not self._leledc_gate_prev.get(strat.instrument, True):
+                        return False, (
+                            f"Leledc exhaustion: bull={self._leledc_bull_count.get(strat.instrument, 0)} "
+                            f"bear={self._leledc_bear_count.get(strat.instrument, 0)}"
+                        )
+
+        # Prior-day level proximity gate
+        if strategy_id:
+            cfg = self._strategy_configs.get(strategy_id)
+            if cfg and cfg.prior_day_level_buffer > 0:
+                strat = self._strategies.get(strategy_id)
+                if strat and not strat.manual_override:
+                    if not self._prior_day_gate_prev.get(strat.instrument, True):
+                        levels = self._prior_day_levels.get(strat.instrument, {})
+                        return False, (
+                            f"Near prior-day level (buf={cfg.prior_day_level_buffer}): "
+                            f"H={levels.get('high', '?')} L={levels.get('low', '?')} "
+                            f"VPOC={levels.get('vpoc', '?')}"
                         )
 
         # Position size check
@@ -500,6 +759,18 @@ class SafetyManager:
                 "trade_count_today": strat.trade_count_today,
                 "daily_pnl": round(strat.daily_pnl, 2),
                 "vix_gated": vix_gated,
+                "leledc_gated": (
+                    cfg is not None
+                    and cfg.leledc_maj_qual > 0
+                    and not self._leledc_gate_prev.get(strat.instrument, True)
+                    and not strat.manual_override
+                ),
+                "prior_day_gated": (
+                    cfg is not None
+                    and cfg.prior_day_level_buffer > 0
+                    and not self._prior_day_gate_prev.get(strat.instrument, True)
+                    and not strat.manual_override
+                ),
             }
 
         return {
@@ -516,6 +787,10 @@ class SafetyManager:
             "extended_pause": self._extended_pause,
             "extended_pause_reason": self._extended_pause_reason,
             "rolling_sl_5d": rolling_sl_5d,
+            "prior_day_levels": {
+                inst: {k: round(v, 2) if v is not None else None for k, v in lvls.items()}
+                for inst, lvls in self._prior_day_levels.items()
+            },
             "strategies": strategies,
         }
 
