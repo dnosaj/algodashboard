@@ -1,10 +1,10 @@
 """Fetch prior-day VIX close for death zone gating.
 
-Uses yfinance to get prior-day VIX close.
-DXLink was tried but tastytrade doesn't serve Summary events for index
-symbols ($VIX.X) — all requests time out. yfinance is reliable with the
-.item() fix for pandas Series extraction.
+Primary: tastytrade DXLink Summary event (prev_day_close_price).
+Fallback: yfinance (if tastytrade unavailable or fails).
+Fail-open: returns None on failure, so trading continues unblocked.
 """
+import asyncio
 import logging
 import socket
 from datetime import datetime, timedelta
@@ -12,6 +12,42 @@ from zoneinfo import ZoneInfo
 
 logger = logging.getLogger(__name__)
 _ET = ZoneInfo("America/New_York")
+
+
+async def _fetch_vix_from_tastytrade(session) -> float | None:
+    """Fetch prior-day VIX close via tastytrade DXLink Summary event."""
+    try:
+        from tastytrade import DXLinkStreamer
+        from tastytrade.instruments import Equity
+        from tastytrade.dxfeed import Summary
+
+        # Look up the correct streamer symbol for VIX
+        vix_equity = await Equity.get(session, 'VIX')
+        # get() may return a list; handle both cases
+        if isinstance(vix_equity, list):
+            vix_equity = vix_equity[0]
+        streamer_symbol = vix_equity.streamer_symbol
+        logger.info(f"[VIX Gate] VIX streamer symbol: {streamer_symbol}")
+
+        # Open a short-lived DXLink connection to get the Summary snapshot
+        async with DXLinkStreamer(session) as streamer:
+            await streamer.subscribe(Summary, [streamer_symbol])
+            # Wait for the first Summary event (with timeout)
+            async for summary in streamer.listen(Summary):
+                if summary.prev_day_close_price is not None:
+                    close = float(summary.prev_day_close_price)
+                    logger.info(
+                        f"[VIX Gate] Prior-day VIX close from tastytrade: {close:.2f}"
+                    )
+                    return close
+                # Some Summary events may have None fields; keep listening briefly
+                break
+
+        logger.warning("[VIX Gate] tastytrade Summary had no prev_day_close_price")
+        return None
+    except Exception as e:
+        logger.warning(f"[VIX Gate] tastytrade VIX fetch failed: {e}")
+        return None
 
 
 def _fetch_vix_from_yfinance() -> float | None:
@@ -47,10 +83,22 @@ def _fetch_vix_from_yfinance() -> float | None:
 
 
 async def fetch_prior_day_vix_close(session=None) -> float | None:
-    """Return yesterday's VIX close, or None on failure.
+    """Return yesterday's VIX close. Tastytrade primary, yfinance fallback.
 
-    Uses yfinance. Session parameter kept for API compatibility but unused
-    (DXLink doesn't serve index symbols).
     Fail-open: returns None on failure, so trading continues unblocked.
     """
+    # Try tastytrade first if session available (15s timeout)
+    if session is not None:
+        try:
+            result = await asyncio.wait_for(
+                _fetch_vix_from_tastytrade(session), timeout=15
+            )
+        except asyncio.TimeoutError:
+            logger.warning("[VIX Gate] tastytrade VIX fetch timed out after 15s")
+            result = None
+        if result is not None:
+            return result
+        logger.info("[VIX Gate] tastytrade failed, falling back to yfinance")
+
+    # Fallback to yfinance
     return _fetch_vix_from_yfinance()

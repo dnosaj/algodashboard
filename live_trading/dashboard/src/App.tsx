@@ -8,6 +8,7 @@ import { SignalFeed } from './components/SignalFeed';
 import { TradeLog } from './components/TradeLog';
 import { DailyPnL } from './components/DailyPnL';
 import { SafetyPanel } from './components/SafetyPanel';
+import { NewsAlert } from './components/NewsAlert';
 
 const WS_URL = `ws://${window.location.hostname}:${window.location.port || '8000'}/ws`;
 const FONT = "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace";
@@ -60,6 +61,8 @@ function App() {
       <div style={{ marginBottom: 16 }}>
         <StatusPanel status={status} connected={connected} />
       </div>
+
+      <NewsAlert />
 
       {/* Instrument cards row */}
       <div style={{ display: 'flex', gap: 16, marginBottom: 16 }}>
