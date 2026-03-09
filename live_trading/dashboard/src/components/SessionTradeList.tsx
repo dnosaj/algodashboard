@@ -29,8 +29,11 @@ function formatDate(iso: string): string {
 
 function strategyLabel(id?: string): string {
   if (!id) return '?';
+  if (id.includes('VSCALPC')) return 'vC';
+  if (id.includes('VSCALPB')) return 'vB';
   if (id.includes('V15')) return 'v15';
   if (id.includes('V11')) return 'v11';
+  if (id.includes('MES')) return 'MES';
   return id;
 }
 
@@ -173,8 +176,11 @@ export function SessionTradeList({ trades }: SessionTradeListProps) {
           <tbody>
             {rows.map((r) => {
               const isWin = r.pnl > 0;
-              const isV15 = (r.strategy_id || '').includes('V15');
-              const stratColor = isV15 ? '#00aaff' : '#8888cc';
+              const sid = r.strategy_id || '';
+              const stratColor = sid.includes('VSCALPC') ? '#bb77ff'
+                : sid.includes('V15') ? '#00aaff'
+                : sid.includes('MES') ? '#ffdd00'
+                : '#8888cc';  // vScalpB and others
               const sideColor = r.side === 'LONG' ? '#00ff88' : '#ff4444';
 
               return (
@@ -195,7 +201,7 @@ export function SessionTradeList({ trades }: SessionTradeListProps) {
                       style={{
                         padding: '1px 6px',
                         borderRadius: 3,
-                        backgroundColor: isV15 ? '#00aaff15' : '#8888cc15',
+                        backgroundColor: stratColor + '15',
                         color: stratColor,
                         fontWeight: 600,
                         fontSize: 9,

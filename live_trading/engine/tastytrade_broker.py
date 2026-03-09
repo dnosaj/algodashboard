@@ -824,6 +824,143 @@ class TastytradeBroker:
                         f"bracket KEPT for reconciliation: {e}"
                     )
 
+    async def replace_bracket_sl(
+        self,
+        strategy_id: str,
+        tag: str,
+        new_stop_price: float,
+    ) -> bool:
+        """Replace the SL on a resting OCO bracket with a new stop price.
+
+        Used for SL-to-breakeven after TP1: cancel the runner's OCO and replace
+        with a new OCO at the same TP but new SL (entry price = breakeven).
+
+        Returns True if replacement succeeded, False if it failed.
+        On failure, the old bracket is preserved (cancel failed) or the runner
+        has no exchange protection (cancel succeeded but replace failed).
+
+        RACE SAFETY: The old bracket is kept in self._brackets during the
+        cancel-replace window so _process_alert_fill can still match fills
+        that arrive during the async gap. After the new OCO is placed
+        (which overwrites the key), we check if the old bracket was filled
+        during the window and cancel the new OCO if so.
+        """
+        key = f"{strategy_id}__{tag}" if tag else strategy_id
+        old_bracket = self._brackets.get(key)
+        if old_bracket is None:
+            logger.warning(f"[TT] replace_bracket_sl: no bracket found for {key}")
+            return False
+        if old_bracket.filled:
+            logger.info(f"[TT] replace_bracket_sl: bracket {key} already filled")
+            return False
+
+        old_stop = old_bracket.stop_price
+        old_tp = old_bracket.tp_price
+
+        # Step 1: Cancel the existing OCO (keep old bracket in dict for fill matching)
+        try:
+            if old_bracket.is_oco and old_bracket.complex_order_id is not None:
+                await self._account.delete_complex_order(
+                    self._session, old_bracket.complex_order_id
+                )
+            elif old_bracket.order_id is not None:
+                await self._account.delete_order(
+                    self._session, old_bracket.order_id
+                )
+        except Exception as e:
+            if old_bracket.filled:
+                logger.info(
+                    f"[TT] replace_bracket_sl: {key} filled during cancel "
+                    f"@ {old_bracket.fill_price:.2f}, no replacement needed"
+                )
+                self._brackets.pop(key, None)
+                return False
+            logger.critical(
+                f"[TT] replace_bracket_sl: cancel FAILED for {key}: {e} — "
+                f"old bracket may still be live, NOT replacing"
+            )
+            return False
+
+        # Check if the bracket was filled during the cancel await
+        if old_bracket.filled:
+            logger.info(
+                f"[TT] replace_bracket_sl: {key} filled during cancel window "
+                f"@ {old_bracket.fill_price:.2f}, no replacement needed"
+            )
+            self._brackets.pop(key, None)
+            return False
+
+        # Step 2: Place new OCO with updated SL
+        # Round to 2 decimals (tick precision) to avoid float artifacts
+        new_sl_pts = round(abs(new_stop_price - old_bracket.entry_price), 2)
+        original_tp_pts = round(abs(old_tp - old_bracket.entry_price), 2)
+        try:
+            # place_oco_bracket overwrites self._brackets[key] with new BracketState
+            await self.place_oco_bracket(
+                instrument=old_bracket.instrument,
+                side=old_bracket.side,
+                qty=old_bracket.qty,
+                entry_price=old_bracket.entry_price,
+                stop_pts=new_sl_pts,
+                tp_pts=original_tp_pts,
+                strategy_id=strategy_id,
+                tag=tag,
+            )
+
+            # Post-placement race check: if old bracket filled during the
+            # place_oco_bracket await, the fill was processed against the old
+            # bracket object (still referenced). Cancel the new orphan OCO.
+            if old_bracket.filled:
+                logger.warning(
+                    f"[TT] replace_bracket_sl: old {key} filled during replace "
+                    f"@ {old_bracket.fill_price:.2f} — cancelling new orphan OCO"
+                )
+                new_bracket = self._brackets.get(key)
+                if new_bracket and not new_bracket.filled:
+                    try:
+                        if new_bracket.complex_order_id is not None:
+                            await self._account.delete_complex_order(
+                                self._session, new_bracket.complex_order_id
+                            )
+                        self._brackets.pop(key, None)
+                    except Exception as cancel_err:
+                        logger.critical(
+                            f"[TT] Failed to cancel orphan OCO for {key}: {cancel_err}"
+                        )
+                return False
+
+            logger.info(
+                f"[TT] SL→BE: {key} SL moved {old_stop:.2f} → {new_stop_price:.2f} "
+                f"(TP stays {old_tp:.2f})"
+            )
+            return True
+        except Exception as e:
+            # Cancel succeeded but new OCO failed — remove stale cancelled bracket
+            self._brackets.pop(key, None)
+            logger.critical(
+                f"[TT] replace_bracket_sl: new OCO FAILED for {key}: {e} — "
+                f"runner has NO exchange protection! Placing fallback stop."
+            )
+            # Emergency fallback: place a simple stop at the new price
+            try:
+                await self._place_stop(
+                    old_bracket.instrument, old_bracket.side, old_bracket.qty,
+                    old_bracket.entry_price,
+                    new_sl_pts,
+                    strategy_id=strategy_id,
+                )
+                logger.info(
+                    f"[TT] Fallback stop placed for {key} at {new_stop_price:.2f}"
+                )
+                self._oco_failed_sids.add(strategy_id)
+            except Exception as e2:
+                logger.critical(
+                    f"[TT] Fallback stop ALSO failed for {key}: {e2} — "
+                    f"runner has NO protection!"
+                )
+                self._protection_failed_sids.add(strategy_id)
+            return False
+
     async def check_bracket_fills(self, strategy_id: str) -> list[dict]:
         """Check if resting brackets were triggered on the exchange.
 

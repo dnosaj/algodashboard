@@ -408,6 +408,37 @@ async def process_bar(
                     f"[Runner] Partial bracket TP1 for {sid} "
                     f"x{partial_qty} @ {fill_price:.2f}"
                 )
+
+                # SL→BE: After TP1, move runner's SL to entry price (breakeven)
+                if (strategy.config.move_sl_to_be_after_tp1
+                        and hasattr(state.order_manager, 'replace_bracket_sl')):
+                    be_price = strategy.state.entry_price
+                    try:
+                        ok = await state.order_manager.replace_bracket_sl(
+                            sid, "tp2", be_price,
+                        )
+                        if ok:
+                            logger.info(
+                                f"[Runner] SL→BE for {sid}: runner SL moved to "
+                                f"{be_price:.2f} (entry price)"
+                            )
+                        else:
+                            # OCO replacement failed — fallback stop placed but
+                            # no TP on exchange. Re-enable bar-close TP so the
+                            # runner can still exit at TP2 via on_bar() checks.
+                            strategy.intrabar_monitor_active = False
+                            logger.warning(
+                                f"[Runner] SL→BE failed for {sid}, "
+                                f"bar-close TP/SL re-enabled for runner"
+                            )
+                    except Exception as e:
+                        strategy.intrabar_monitor_active = False
+                        logger.critical(
+                            f"[Runner] SL→BE exception for {sid}: {e}, "
+                            f"bar-close TP/SL re-enabled",
+                            exc_info=True,
+                        )
+
                 # DON'T return — position still open, continue to on_bar()
             else:
                 # Full exit: SL or TP2

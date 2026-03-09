@@ -120,8 +120,14 @@ class IntraBarExitMonitor:
             return (ExitReason.TAKE_PROFIT, False)
 
         # SL check (paper mode -- live mode has exchange resting STOP)
-        if strat.config.max_loss_pts > 0 and unrealized <= -strat.config.max_loss_pts:
-            return (ExitReason.STOP_LOSS, False)
+        # After TP1 with move_sl_to_be_after_tp1, SL moves to breakeven (0 pts)
+        if strat.config.max_loss_pts > 0:
+            sl_threshold = strat.config.max_loss_pts
+            if (strat.config.move_sl_to_be_after_tp1
+                    and strat.state.partial_filled):
+                sl_threshold = 0  # Breakeven: exit if unrealized <= 0
+            if unrealized <= -sl_threshold:
+                return (ExitReason.STOP_LOSS, False)
 
         # Trail check (only tp_scalp mode with trail activated)
         if strat.state.trail_activated:

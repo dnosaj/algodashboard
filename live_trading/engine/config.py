@@ -37,6 +37,7 @@ class StrategyConfig:
     max_strategy_daily_loss: float = 0.0  # Max daily loss per strategy (0 = disabled)
     vix_death_zone_min: float = 0.0   # VIX death zone lower bound (0 = disabled)
     vix_death_zone_max: float = 0.0   # VIX death zone upper bound (0 = disabled)
+    move_sl_to_be_after_tp1: bool = False  # After TP1 partial fill, move runner SL to entry price
     leledc_maj_qual: int = 0            # Leledc exhaustion threshold (0 = disabled)
     prior_day_level_buffer: float = 0.0 # Block within N pts of prior-day levels (0 = disabled)
     session_start_et: str = "10:00"   # RTH start (Eastern Time)
@@ -168,6 +169,30 @@ MNQ_VSCALPB = StrategyConfig(
 #     session_close_et="15:30",
 # )
 
+MNQ_VSCALPC = StrategyConfig(
+    instrument="MNQ",
+    strategy_id="MNQ_VSCALPC",
+    sm_index=10, sm_flow=12, sm_norm=200, sm_ema=100,
+    sm_threshold=0.0,  # Same entries as V15 — runner captures larger moves
+    exit_mode="tp_scalp",
+    tp_pts=25,  # TP2: runner target
+    trail_activate_pts=25,
+    trail_distance_pts=8,
+    rsi_len=8, rsi_buy=60, rsi_sell=40,
+    cooldown=20, max_loss_pts=40,
+    dollar_per_pt=2.0,
+    entry_qty=2,           # 2 contracts: partial at TP1, runner to TP2
+    partial_tp_pts=7,      # TP1: close 1 contract at +7 pts ($14)
+    partial_qty=1,         # Close 1 of 2 at TP1
+    breakeven_after_bars=45,   # Close stale runners after 45 bars (~45 min)
+    move_sl_to_be_after_tp1=True,  # After TP1, move runner SL to entry (risk-free runner)
+    max_strategy_daily_loss=200.0,  # One 2-contract SL is $160; $200 allows recovery
+    vix_death_zone_min=19.0,   # Same VIX gate as V15 (same entries)
+    vix_death_zone_max=22.0,
+    leledc_maj_qual=9,  # Block entry on Leledc exhaustion (9+ consecutive directional closes)
+    session_end_et="13:00",  # Same late-day cutoff as V15
+)
+
 MES_V2 = StrategyConfig(
     instrument="MES",
     strategy_id="MES_V2",
@@ -191,6 +216,6 @@ MES_V2 = StrategyConfig(
 )
 
 DEFAULT_CONFIG = EngineConfig(
-    strategies=[MNQ_V15, MNQ_VSCALPB, MES_V2],
+    strategies=[MNQ_V15, MNQ_VSCALPB, MNQ_VSCALPC, MES_V2],
     safety=SafetyConfig(paper_mode=True),
 )

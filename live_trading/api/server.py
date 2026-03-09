@@ -446,17 +446,32 @@ def create_app(handle: EngineHandle) -> FastAPI:
     AUTOSAVE_INTERVAL = 300  # 5 minutes
 
     async def _autosave_loop() -> None:
-        """Background task: auto-save session every 5 minutes."""
+        """Background task: auto-save session every 5 minutes.
+
+        Only saves if there are closed trades from TODAY (ET).  This prevents
+        the auto-save from overwriting prior-day session files when the engine
+        runs across a date boundary (e.g. overnight or over the weekend).
+        """
         await asyncio.sleep(60)  # Wait 1 min after startup before first save
         while True:
             try:
                 await asyncio.sleep(AUTOSAVE_INTERVAL)
                 async with _save_lock:
+                    from zoneinfo import ZoneInfo
+                    _ET = ZoneInfo("America/New_York")
+                    today_et = datetime.now(_ET).date()
                     trades = handle.get_trades()
                     closed = [t for t in trades if t.exit_time is not None]
-                    if closed:  # Only save if there are closed trades
+                    # Only save if at least one trade exited today
+                    today_trades = [
+                        t for t in closed
+                        if t.exit_time and t.exit_time.astimezone(_ET).date() == today_et
+                    ]
+                    if today_trades:
                         _do_save_session()
-                        logger.info(f"[AutoSave] Session saved ({len(closed)} trades)")
+                        logger.info(f"[AutoSave] Session saved ({len(today_trades)} today, {len(closed)} total)")
+                    elif closed:
+                        logger.debug(f"[AutoSave] Skipped — {len(closed)} trades but none from today ({today_et})")
             except asyncio.CancelledError:
                 break
             except Exception as e:
@@ -471,13 +486,20 @@ def create_app(handle: EngineHandle) -> FastAPI:
 
     @app.on_event("shutdown")
     async def shutdown() -> None:
-        # Auto-save on shutdown
+        # Auto-save on shutdown — only if there are trades from today
         try:
+            from zoneinfo import ZoneInfo
+            _ET = ZoneInfo("America/New_York")
+            today_et = datetime.now(_ET).date()
             trades = handle.get_trades()
             closed = [t for t in trades if t.exit_time is not None]
-            if closed:
+            today_trades = [
+                t for t in closed
+                if t.exit_time and t.exit_time.astimezone(_ET).date() == today_et
+            ]
+            if today_trades:
                 _do_save_session()
-                logger.info(f"[Shutdown] Session saved ({len(closed)} trades)")
+                logger.info(f"[Shutdown] Session saved ({len(today_trades)} today, {len(closed)} total)")
         except Exception as e:
             logger.error(f"[Shutdown] Save failed: {e}")
         if _autosave_task:
@@ -681,6 +703,18 @@ def create_app(handle: EngineHandle) -> FastAPI:
             save_date = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
         filename = f"session_{save_date}.json"
         filepath = SESSIONS_DIR / filename
+
+        # Guard: never overwrite a prior-day session file unless it's a
+        # daily_rotate save (which uses date_override for the previous day).
+        if not date_override and filepath.exists():
+            try:
+                existing = json.loads(filepath.read_text())
+                existing_date = existing.get("date", "")
+                if existing_date and existing_date != save_date:
+                    logger.warning(f"[Save] Refusing to overwrite {filename} (contains date {existing_date}, today is {save_date})")
+                    return {"filename": filename, "bars": 0, "trades": 0, "skipped": True}
+            except Exception:
+                pass  # If we can't read the file, overwrite is fine
 
         session = {
             "date": save_date,

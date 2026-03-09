@@ -88,18 +88,16 @@ function App() {
       )}
 
       {/* Price Chart (key forces remount on instrument switch) */}
-      {chartBars.length > 0 && (
-        <div style={{ marginBottom: 16 }}>
-          <PriceChart
-            key={selectedInstrument}
-            bars={chartBars}
-            trades={chartTrades}
-            instrument={selectedInstrument}
-            safetyStatus={safetyStatus}
-            blockedSignals={blockedSignals}
-          />
-        </div>
-      )}
+      <div style={{ marginBottom: 16 }}>
+        <PriceChart
+          key={selectedInstrument}
+          bars={chartBars}
+          trades={chartTrades}
+          instrument={selectedInstrument}
+          safetyStatus={safetyStatus}
+          blockedSignals={blockedSignals}
+        />
+      </div>
 
       {/* Signal feed */}
       <div style={{ marginBottom: 16 }}>

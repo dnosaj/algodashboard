@@ -557,12 +557,16 @@ class IncrementalStrategy:
         # TP, trail, SL checks — skip if intra-bar monitor handles these
         if self.state.position != 0 and not self.intrabar_monitor_active:
             # Max loss stop (both modes): check bar[i-1] close, fill at bar[i] open
+            # After TP1 with move_sl_to_be_after_tp1, SL moves to breakeven
             if self.config.max_loss_pts > 0 and prev_bar is not None:
-                if self.state.position == 1 and prev_bar.close <= self.state.entry_price - self.config.max_loss_pts:
+                sl_pts = self.config.max_loss_pts
+                if self.config.move_sl_to_be_after_tp1 and self.state.partial_filled:
+                    sl_pts = 0  # Breakeven: close if price returns to entry
+                if self.state.position == 1 and prev_bar.close <= self.state.entry_price - sl_pts:
                     signal = self._close_position(bar, ExitReason.STOP_LOSS)
                     self._update_prev(sm_now, bar)
                     return signal
-                elif self.state.position == -1 and prev_bar.close >= self.state.entry_price + self.config.max_loss_pts:
+                elif self.state.position == -1 and prev_bar.close >= self.state.entry_price + sl_pts:
                     signal = self._close_position(bar, ExitReason.STOP_LOSS)
                     self._update_prev(sm_now, bar)
                     return signal
@@ -827,3 +831,9 @@ class IncrementalStrategy:
         self.trades.clear()
         self.state.long_used = False
         self.state.short_used = False
+        # Safety: clear partial exit state in case position survived EOD
+        if self.state.position == 0:
+            self.state.partial_filled = False
+            self.state.qty_remaining = 1
+            self.state.max_favorable = 0.0
+            self.state.trail_activated = False
