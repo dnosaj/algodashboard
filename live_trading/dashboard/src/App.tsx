@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useWebSocket } from './hooks/useWebSocket';
+import { useSupabase } from './hooks/useSupabase';
 import { StatusPanel } from './components/StatusPanel';
 import { Controls } from './components/Controls';
 import { InstrumentCard } from './components/InstrumentCard';
@@ -9,6 +10,8 @@ import { TradeLog } from './components/TradeLog';
 import { DailyPnL } from './components/DailyPnL';
 import { SafetyPanel } from './components/SafetyPanel';
 import { NewsAlert } from './components/NewsAlert';
+import { AnalyticsPanel } from './components/AnalyticsPanel';
+import { IntelPanel } from './components/IntelPanel';
 
 const WS_URL = `ws://${window.location.hostname}:${window.location.port || '8000'}/ws`;
 const FONT = "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace";
@@ -16,6 +19,7 @@ const FONT = "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace";
 function App() {
   const { status, trades, dailyPnl, signals, blockedSignals, bars, connected, sendCommand } =
     useWebSocket(WS_URL);
+  const analytics = useSupabase();
 
   const [selectedInstrument, setSelectedInstrument] = useState<string>('MNQ');
 
@@ -112,6 +116,18 @@ function App() {
       {/* Daily P&L chart */}
       <div style={{ marginBottom: 16 }}>
         <DailyPnL data={dailyPnl} />
+      </div>
+
+      {/* Analytics (Supabase) */}
+      {(analytics.loaded || analytics.error) && (
+        <div style={{ marginBottom: 16 }}>
+          <AnalyticsPanel {...analytics} />
+        </div>
+      )}
+
+      {/* Intel — agent digests feed */}
+      <div style={{ marginBottom: 16 }}>
+        <IntelPanel />
       </div>
     </div>
   );
