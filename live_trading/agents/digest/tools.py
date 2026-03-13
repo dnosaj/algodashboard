@@ -144,6 +144,8 @@ TOOL_DEFINITIONS = [
                         "- risk_flags: [{flag, detail, severity}]\n"
                         "- gate_summary: {blocked_count, gates_active, near_threshold}\n"
                         "- runner_summary: {tp1_fills, runners_profitable, runners_be_time, runners_sl} (if applicable)\n"
+                        "- forensic_insights: [{tool, finding, severity}] (from SL velocity, clustering, near-gate-miss, level proximity)\n"
+                        "- flags_for_frontier: [{hypothesis, evidence, suggested_test, priority, sample_size, recurrence, strategy_id}]\n"
                         "- tomorrow_outlook: {vix, atr, levels, watchlist}\n"
                         "\nFor Morning:\n"
                         "- status_snapshot: {week_pnl, month_pnl, consecutive_days, drift_zscores, drawdown_pcts}\n"
@@ -178,7 +180,7 @@ TOOL_DEFINITIONS = [
     },
     {
         "name": "get_market_regime",
-        "description": "Get market regime context: today's RTH range (high-low), range percentile vs last 30 days, close vs open direction, day type (trending/choppy/mixed). Derived from gate_state_snapshots.",
+        "description": "Get market regime context: RTH OHLC, range percentile vs last 30 days, day type (trending/choppy/mixed), VWAP close, opening range (initial balance). Use days>1 for multi-day context (e.g. 'range expanding for 5 days'). Derived from gate_state_snapshots.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -186,7 +188,59 @@ TOOL_DEFINITIONS = [
                 "instrument": {
                     "type": "string",
                     "description": "Optional: MNQ or MES. Omit for both."
+                },
+                "days": {
+                    "type": "integer",
+                    "description": "Number of recent days to return (default 1). Use >1 for multi-day context patterns."
                 }
+            },
+            "required": ["date"]
+        }
+    },
+    {
+        "name": "get_sl_velocity",
+        "description": "Classify SL exits by speed: rapid/normal/gradual with strategy-specific thresholds. Includes mae_velocity (mae_pts/bars_held) and bars_held distribution. Helps distinguish entry-quality problems (rapid SL) from position-management issues (gradual SL).",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "date": {"type": "string", "description": "Date in YYYY-MM-DD format"},
+                "days": {
+                    "type": "integer",
+                    "description": "Rolling window in days (default 1). Use 5-10 for meaningful aggregation."
+                }
+            },
+            "required": ["date"]
+        }
+    },
+    {
+        "name": "get_entry_clustering",
+        "description": "Flag simultaneous entries across strategies on the same 1-min bar. Computes combined dollar SL risk, max concurrent dollar exposure vs $650 daily limit, and whether clustered trades all won/lost. Distinguishes correlated clusters (same instrument) from coincident clusters (different instruments).",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "date": {"type": "string", "description": "Date in YYYY-MM-DD format"}
+            },
+            "required": ["date"]
+        }
+    },
+    {
+        "name": "get_near_gate_miss",
+        "description": "Find trades that entered just outside gate thresholds. Reports BOTH winning and losing near-misses with net counterfactual P&L. Near-miss windows: VIX within 1.0 of 19/22, ATR within 5% above 263.8, ADR within 0.05 of 0.3, Leledc count 7-8 (threshold 9). Note: a single trade may appear in multiple gates; unique_trades count deduplicates.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "date": {"type": "string", "description": "Date in YYYY-MM-DD format"}
+            },
+            "required": ["date"]
+        }
+    },
+    {
+        "name": "get_level_proximity",
+        "description": "Distance from each trade's entry to nearest prior-day levels (H/L/VPOC/VAH/VAL). Expressed as raw points, % of TP, and ADR-normalized. Reports distance to EACH level individually. Depends on gate_state_snapshots data.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "date": {"type": "string", "description": "Date in YYYY-MM-DD format"}
             },
             "required": ["date"]
         }
@@ -270,7 +324,7 @@ _TRADE_COLUMNS = ",".join([
     "pts", "pnl_net", "commission", "exit_reason", "bars_held", "qty", "is_partial",
     "entry_sm_value", "entry_rsi_value", "entry_bar_volume",
     "mfe_pts", "mae_pts", "signal_price",
-    "gate_vix_close", "gate_leledc_active", "gate_atr_value", "gate_adr_ratio",
+    "gate_vix_close", "gate_leledc_active", "gate_atr_value", "gate_adr_ratio", "gate_leledc_count",
     "is_runner", "trade_group_id", "source", "trade_date", "day_of_week",
 ])
 
@@ -492,13 +546,34 @@ def get_drawdown_status(client) -> list | dict:
 
 @_safe_query
 def get_gate_state(client, *, date: str) -> list | dict:
+    # Try exact date first
     result = (
         client.table("gate_state_snapshots")
         .select("*")
         .eq("snapshot_date", date)
         .execute()
     )
-    return result.data or []
+    if result.data:
+        return result.data
+
+    # Fallback: most recent snapshot (today's isn't written until overnight reset)
+    fallback = (
+        client.table("gate_state_snapshots")
+        .select("*")
+        .lte("snapshot_date", date)
+        .order("snapshot_date", desc=True)
+        .limit(10)  # up to 10 rows (multiple instruments)
+        .execute()
+    )
+    rows = fallback.data or []
+    if rows:
+        latest_date = rows[0]["snapshot_date"]
+        return {
+            "note": f"No snapshot for {date} — showing most recent ({latest_date})",
+            "snapshot_date": latest_date,
+            "data": [r for r in rows if r["snapshot_date"] == latest_date],
+        }
+    return []
 
 
 @_safe_query
@@ -558,13 +633,14 @@ def get_tod_performance(client, *, strategy_id: str = None) -> list | dict:
 # ── M3: Market regime context ────────────────────────────────────────────
 
 @_safe_query
-def get_market_regime(client, *, date: str, instrument: str = None) -> list | dict:
+def get_market_regime(client, *, date: str, instrument: str = None, days: int = 1) -> list | dict:
     d = _parse_date(date)
     start = (d - timedelta(days=45)).isoformat()
 
     query = (
         client.table("gate_state_snapshots")
-        .select("snapshot_date,instrument,rth_open,rth_high,rth_low,rth_close,adr_value,atr_value,vix_close")
+        .select("snapshot_date,instrument,rth_open,rth_high,rth_low,rth_close,"
+                "adr_value,atr_value,vix_close,vwap_close,opening_range_high,opening_range_low")
         .gte("snapshot_date", start)
         .lte("snapshot_date", date)
     )
@@ -586,67 +662,80 @@ def get_market_regime(client, *, date: str, instrument: str = None) -> list | di
 
     regimes = []
     for inst, snapshots in by_inst.items():
-        today_snap = next(
-            (s for s in snapshots if s["snapshot_date"] == date), None
-        )
-        if not today_snap:
-            continue
-
-        rth_high = today_snap.get("rth_high")
-        rth_low = today_snap.get("rth_low")
-        rth_open = today_snap.get("rth_open")
-        rth_close = today_snap.get("rth_close")
-
-        if rth_high is None or rth_low is None:
-            continue
-
-        daily_range = round(rth_high - rth_low, 2)
-
-        # Historical ranges for percentile
-        hist_ranges = []
+        # Historical ranges for percentile (date -> range, skipping nulls)
+        hist_range_by_date: dict[str, float] = {}
         for s in snapshots:
             h, l = s.get("rth_high"), s.get("rth_low")
-            if h is not None and l is not None and s["snapshot_date"] != date:
-                hist_ranges.append(h - l)
+            if h is not None and l is not None:
+                hist_range_by_date[s["snapshot_date"]] = h - l
 
-        range_percentile = None
-        if hist_ranges:
-            below = sum(1 for r in hist_ranges if r <= daily_range)
-            range_percentile = round(below / len(hist_ranges) * 100, 0)
+        # Determine which days to return (last N days of available data)
+        target_dates = sorted(set(s["snapshot_date"] for s in snapshots))
+        if days > 1:
+            target_dates = target_dates[-days:]
+        else:
+            target_dates = [date] if date in target_dates else target_dates[-1:]
 
-        # Trend classification
-        direction = None
-        body_pct = None
-        if rth_open and rth_close and daily_range > 0:
-            body = rth_close - rth_open
-            direction = "up" if body > 0 else "down" if body < 0 else "flat"
-            body_pct = round(abs(body) / daily_range * 100, 0)
+        for target_date in target_dates:
+            snap = next((s for s in snapshots if s["snapshot_date"] == target_date), None)
+            if not snap:
+                continue
 
-        day_type = "unknown"
-        if body_pct is not None:
-            if body_pct >= 60:
-                day_type = "trending"
-            elif body_pct <= 30:
-                day_type = "choppy"
-            else:
-                day_type = "mixed"
+            rth_high = snap.get("rth_high")
+            rth_low = snap.get("rth_low")
+            rth_open = snap.get("rth_open")
+            rth_close = snap.get("rth_close")
 
-        regimes.append({
-            "instrument": inst,
-            "date": date,
-            "rth_open": rth_open,
-            "rth_high": rth_high,
-            "rth_low": rth_low,
-            "rth_close": rth_close,
-            "daily_range_pts": daily_range,
-            "range_percentile_30d": range_percentile,
-            "direction": direction,
-            "body_pct": body_pct,
-            "day_type": day_type,
-            "adr_value": today_snap.get("adr_value"),
-            "atr_value": today_snap.get("atr_value"),
-            "vix_close": today_snap.get("vix_close"),
-        })
+            if rth_high is None or rth_low is None:
+                continue
+
+            daily_range = round(rth_high - rth_low, 2)
+
+            # Percentile vs history (excluding this day)
+            prior_ranges = [r for d, r in hist_range_by_date.items()
+                            if d != target_date]
+            range_percentile = None
+            if prior_ranges:
+                below = sum(1 for r in prior_ranges if r <= daily_range)
+                range_percentile = round(below / len(prior_ranges) * 100, 0)
+
+            # Trend classification
+            direction = None
+            body_pct = None
+            if rth_open and rth_close and daily_range > 0:
+                body = rth_close - rth_open
+                direction = "up" if body > 0 else "down" if body < 0 else "flat"
+                body_pct = round(abs(body) / daily_range * 100, 0)
+
+            day_type = "unknown"
+            if body_pct is not None:
+                if body_pct >= 60:
+                    day_type = "trending"
+                elif body_pct <= 30:
+                    day_type = "choppy"
+                else:
+                    day_type = "mixed"
+
+            regime = {
+                "instrument": inst,
+                "date": target_date,
+                "rth_open": rth_open,
+                "rth_high": rth_high,
+                "rth_low": rth_low,
+                "rth_close": rth_close,
+                "daily_range_pts": daily_range,
+                "range_percentile_30d": range_percentile,
+                "direction": direction,
+                "body_pct": body_pct,
+                "day_type": day_type,
+                "adr_value": snap.get("adr_value"),
+                "atr_value": snap.get("atr_value"),
+                "vix_close": snap.get("vix_close"),
+                "vwap_close": snap.get("vwap_close"),
+                "opening_range_high": snap.get("opening_range_high"),
+                "opening_range_low": snap.get("opening_range_low"),
+            }
+            regimes.append(regime)
 
     return regimes
 
@@ -915,6 +1004,405 @@ def get_dow_performance(client, *, strategy_id: str = None) -> list | dict:
     return rows
 
 
+# ── F1: SL velocity analysis ──────────────────────────────────────────────
+
+# Strategy-specific SL velocity thresholds (bars_held buckets)
+_SL_VELOCITY_THRESHOLDS = {
+    "MNQ_VSCALPB": {"rapid": 3, "normal": 10},    # rapid <3, normal 3-10, gradual 10+
+    "MNQ_V15":     {"rapid": 5, "normal": 15},     # rapid <5, normal 5-15, gradual 15+
+    "MNQ_VSCALPC": {"rapid": 3, "normal": 15},     # rapid <3 = TP1 never filled (2x loss)
+    "MES_V2":      {"rapid": 60, "normal": 100},   # fast <60, normal 60-100, extended 100+
+}
+
+# SL distance per strategy (for dollar-risk calculations)
+_SL_DISTANCE = {
+    "MNQ_V15": {"pts": 40, "dollar_per_pt": 2.0},
+    "MNQ_VSCALPB": {"pts": 10, "dollar_per_pt": 2.0},
+    "MNQ_VSCALPC": {"pts": 40, "dollar_per_pt": 2.0},
+    "MES_V2": {"pts": 35, "dollar_per_pt": 5.0},
+}
+
+
+@_safe_query
+def get_sl_velocity(client, *, date: str, days: int = 1) -> list | dict:
+    d = _parse_date(date)
+    start_date = (d - timedelta(days=max(days - 1, 0))).isoformat()
+
+    result = (
+        client.table("trades")
+        .select("strategy_id,instrument,bars_held,mae_pts,pnl_net,exit_reason,is_runner,trade_date,entry_sm_value,entry_rsi_value")
+        .eq("exit_reason", "SL")
+        .gte("trade_date", start_date)
+        .lte("trade_date", date)
+        .in_("source", ["paper", "live"])
+        .order("entry_time")
+        .execute()
+    )
+    sl_trades = result.data or []
+
+    if not sl_trades:
+        return []
+
+    by_strat: dict[str, list] = {}
+    for t in sl_trades:
+        sid = t.get("strategy_id", "unknown")
+        if sid not in by_strat:
+            by_strat[sid] = []
+        by_strat[sid].append(t)
+
+    analysis = []
+    for sid, trades in by_strat.items():
+        thresholds = _SL_VELOCITY_THRESHOLDS.get(sid, {"rapid": 5, "normal": 15})
+        buckets = {"rapid": [], "normal": [], "gradual": []}
+
+        for t in trades:
+            bh = t.get("bars_held") or 0
+            mae = t.get("mae_pts") or 0
+            mae_vel = round(mae / max(bh, 1), 2)
+            pnl_val = float(t.get("pnl_net") or 0)
+            is_be_exit = t.get("is_runner") and bh > 0 and abs(pnl_val) < 5.0  # SL at ~breakeven after TP1
+
+            entry = {
+                "bars_held": bh,
+                "mae_pts": mae,
+                "mae_velocity": mae_vel,
+                "pnl_net": t.get("pnl_net"),
+                "trade_date": t.get("trade_date"),
+                "is_breakeven_exit": is_be_exit,
+                "entry_sm_value": t.get("entry_sm_value"),
+                "entry_rsi_value": t.get("entry_rsi_value"),
+            }
+
+            if is_be_exit:
+                # SL at breakeven after TP1 is a success, not a velocity issue
+                buckets["gradual"].append(entry)
+            elif bh < thresholds["rapid"]:
+                buckets["rapid"].append(entry)
+            elif bh < thresholds["normal"]:
+                buckets["normal"].append(entry)
+            else:
+                buckets["gradual"].append(entry)
+
+        bars_held_values = [t.get("bars_held", 0) for t in trades]
+        analysis.append({
+            "strategy_id": sid,
+            "total_sl_exits": len(trades),
+            "date_range": f"{start_date} to {date}" if days > 1 else date,
+            "rapid_count": len(buckets["rapid"]),
+            "normal_count": len(buckets["normal"]),
+            "gradual_count": len(buckets["gradual"]),
+            "rapid_pct": round(len(buckets["rapid"]) / len(trades) * 100, 1),
+            "thresholds": thresholds,
+            "bars_held_min": min(bars_held_values),
+            "bars_held_max": max(bars_held_values),
+            "bars_held_median": sorted(bars_held_values)[len(bars_held_values) // 2],
+            "rapid_trades": buckets["rapid"][:5],  # Cap detail to avoid bloat
+            "be_exits": [e for e in buckets["gradual"] if e.get("is_breakeven_exit")][:3],
+        })
+
+    return analysis
+
+
+# ── F2: Entry clustering ─────────────────────────────────────────────────
+
+@_safe_query
+def get_entry_clustering(client, *, date: str) -> list | dict:
+    result = (
+        client.table("trades")
+        .select("strategy_id,instrument,side,entry_time,exit_time,entry_price,pnl_net,qty,trade_date")
+        .eq("trade_date", date)
+        .in_("source", ["paper", "live"])
+        .order("entry_time")
+        .execute()
+    )
+    trades = result.data or []
+
+    if len(trades) < 2:
+        return {"clusters": [], "max_concurrent_dollar_risk": 0}
+
+    # Group by 1-minute bar (truncate to minute)
+    by_minute: dict[str, list] = {}
+    for t in trades:
+        et = t.get("entry_time", "")[:16]  # "2026-03-13T10:05" — minute resolution
+        if et not in by_minute:
+            by_minute[et] = []
+        by_minute[et].append(t)
+
+    clusters = []
+    max_dollar_risk = 0.0
+
+    for minute, group in by_minute.items():
+        if len(group) < 2:
+            continue
+
+        # Compute dollar SL risk for cluster
+        combined_sl_risk = 0.0
+        instruments = set()
+        outcomes = []
+        for t in group:
+            sid = t.get("strategy_id", "")
+            sl_info = _SL_DISTANCE.get(sid, {"pts": 40, "dollar_per_pt": 2.0})
+            qty = t.get("qty", 1)
+            risk = sl_info["pts"] * sl_info["dollar_per_pt"] * qty
+            combined_sl_risk += risk
+            instruments.add(t.get("instrument", ""))
+            pnl = float(t.get("pnl_net") or 0)
+            outcomes.append("win" if pnl > 0 else "loss")
+
+        # Classify cluster type
+        cluster_type = "correlated" if len(instruments) == 1 else "coincident"
+
+        # Correlation realized
+        all_same = len(set(outcomes)) == 1
+        correlation = f"all_{outcomes[0]}" if all_same else "mixed"
+
+        daily_limit = 650  # SafetyConfig.max_daily_loss — update if config changes
+        risk_pct_of_limit = round(combined_sl_risk / daily_limit * 100, 1)
+
+        clusters.append({
+            "entry_minute": minute,
+            "trades": len(group),
+            "strategies": [t.get("strategy_id") for t in group],
+            "instruments": list(instruments),
+            "cluster_type": cluster_type,
+            "combined_sl_risk": round(combined_sl_risk, 2),
+            "risk_pct_of_daily_limit": risk_pct_of_limit,
+            "correlation_realized": correlation,
+            "total_pnl": round(sum(float(t.get("pnl_net") or 0) for t in group), 2),
+        })
+
+        max_dollar_risk = max(max_dollar_risk, combined_sl_risk)
+
+    return {
+        "clusters": clusters,
+        "max_concurrent_dollar_risk": round(max_dollar_risk, 2),
+        "daily_limit": 650,
+        "risk_flag": max_dollar_risk > 325,  # >50% of daily limit
+    }
+
+
+# ── F3: Near-gate miss analysis ──────────────────────────────────────────
+
+@_safe_query
+def get_near_gate_miss(client, *, date: str) -> list | dict:
+    result = (
+        client.table("trades")
+        .select(_TRADE_COLUMNS)
+        .eq("trade_date", date)
+        .in_("source", ["paper", "live"])
+        .order("entry_time")
+        .execute()
+    )
+    trades = result.data or []
+
+    if not trades:
+        return []
+
+    near_misses = []
+
+    for t in trades:
+        pnl = float(t.get("pnl_net") or 0)
+        sid = t.get("strategy_id", "")
+        outcome = "win" if pnl > 0 else "loss"
+
+        # VIX near-miss: within 1.0 of death zone boundaries (19-22)
+        vix = t.get("gate_vix_close")
+        if vix is not None and sid in ("MNQ_V15", "MNQ_VSCALPC"):
+            if 18.0 <= vix < 19.0 or 22.0 < vix <= 23.0:
+                near_misses.append({
+                    "gate": "vix_death_zone",
+                    "strategy_id": sid,
+                    "gate_value": vix,
+                    "threshold": "19-22",
+                    "distance": round(min(abs(vix - 19), abs(vix - 22)), 2),
+                    "outcome": outcome,
+                    "pnl_net": pnl,
+                    "counterfactual": f"Would have been blocked, saving ${abs(pnl):.2f}" if pnl < 0 else f"Would have blocked a ${pnl:.2f} winner",
+                })
+
+        # ATR near-miss: within 5% above threshold (263.8)
+        atr = t.get("gate_atr_value")
+        if atr is not None and sid == "MNQ_VSCALPC":
+            atr_threshold = 263.8
+            if atr_threshold <= atr < atr_threshold * 1.05:
+                near_misses.append({
+                    "gate": "prior_day_atr",
+                    "strategy_id": sid,
+                    "gate_value": round(atr, 2),
+                    "threshold": atr_threshold,
+                    "distance": round(atr - atr_threshold, 2),
+                    "distance_pct": round((atr - atr_threshold) / atr_threshold * 100, 1),
+                    "outcome": outcome,
+                    "pnl_net": pnl,
+                    "counterfactual": f"Would have been blocked, saving ${abs(pnl):.2f}" if pnl < 0 else f"Would have blocked a ${pnl:.2f} winner",
+                })
+
+        # ADR near-miss: within 0.05 of 0.3 threshold (direction-aware)
+        # Gate blocks longs when ratio >= 0.3, shorts when ratio <= -0.3
+        adr = t.get("gate_adr_ratio")
+        side = t.get("side", "")
+        if adr is not None and t.get("instrument") == "MNQ":
+            adr_threshold = 0.3
+            is_near = False
+            if side == "long" and 0.25 <= adr < 0.30:
+                is_near = True
+            elif side == "short" and -0.30 < adr <= -0.25:
+                is_near = True
+            if is_near:
+                near_misses.append({
+                    "gate": "adr_directional",
+                    "strategy_id": sid,
+                    "gate_value": round(adr, 3),
+                    "threshold": adr_threshold,
+                    "side": side,
+                    "distance": round(adr_threshold - abs(adr), 3),
+                    "outcome": outcome,
+                    "pnl_net": pnl,
+                    "counterfactual": f"Would have been blocked, saving ${abs(pnl):.2f}" if pnl < 0 else f"Would have blocked a ${pnl:.2f} winner",
+                })
+
+        # Leledc near-miss: count at 7 or 8 (threshold 9)
+        leledc_count = t.get("gate_leledc_count")
+        if leledc_count is not None and leledc_count in (7, 8) and t.get("instrument") == "MNQ":
+            near_misses.append({
+                "gate": "leledc_exhaustion",
+                "strategy_id": sid,
+                "gate_value": leledc_count,
+                "threshold": 9,
+                "distance": 9 - leledc_count,
+                "outcome": outcome,
+                "pnl_net": pnl,
+                "counterfactual": f"Would have been blocked at threshold={leledc_count}, saving ${abs(pnl):.2f}" if pnl < 0 else f"Would have blocked a ${pnl:.2f} winner at threshold={leledc_count}",
+            })
+
+    # Summary stats (deduplicate P&L by trade to avoid multi-gate inflation)
+    if near_misses:
+        # Per-gate counts
+        loser_count = sum(1 for nm in near_misses if nm["outcome"] == "loss")
+        winner_count = sum(1 for nm in near_misses if nm["outcome"] == "win")
+
+        # Deduplicate by trade for P&L summary (a trade may trigger multiple gates)
+        seen_trades: dict[str, float] = {}
+        for nm in near_misses:
+            key = f"{nm['strategy_id']}_{nm.get('pnl_net', 0)}"
+            if key not in seen_trades:
+                seen_trades[key] = nm["pnl_net"]
+        deduped_pnl = sum(seen_trades.values())
+
+        return {
+            "near_misses": near_misses,
+            "total_near_miss_entries": len(near_misses),
+            "unique_trades": len(seen_trades),
+            "losers": loser_count,
+            "winners": winner_count,
+            "net_counterfactual_pnl": round(deduped_pnl, 2),
+            "net_verdict": "gates should be TIGHTER" if deduped_pnl < -10 else "gates working well" if deduped_pnl > 10 else "neutral",
+        }
+
+    return []
+
+
+# ── F4: Level proximity analysis ─────────────────────────────────────────
+
+@_safe_query
+def get_level_proximity(client, *, date: str) -> list | dict:
+    # Get trades for the date
+    trade_result = (
+        client.table("trades")
+        .select("strategy_id,instrument,side,entry_price,pnl_net,exit_reason,trade_date")
+        .eq("trade_date", date)
+        .in_("source", ["paper", "live"])
+        .order("entry_time")
+        .execute()
+    )
+    trades = trade_result.data or []
+
+    if not trades:
+        return []
+
+    # Get prior-day levels from gate_state_snapshots (use previous trading day's snapshot)
+    d = _parse_date(date)
+    lookback_start = (d - timedelta(days=5)).isoformat()
+    snap_result = (
+        client.table("gate_state_snapshots")
+        .select("snapshot_date,instrument,prior_day_high,prior_day_low,prior_day_vpoc,prior_day_vah,prior_day_val,adr_value")
+        .gte("snapshot_date", lookback_start)
+        .lte("snapshot_date", date)
+        .order("snapshot_date", desc=True)
+        .execute()
+    )
+    snapshots = snap_result.data or []
+
+    if not snapshots:
+        return {"error": "No gate_state_snapshots data — levels unavailable"}
+
+    # Get most recent snapshot per instrument (levels active on trade date)
+    levels_by_inst: dict[str, dict] = {}
+    for s in snapshots:
+        inst = s["instrument"]
+        if inst not in levels_by_inst:
+            levels_by_inst[inst] = s
+
+    # TP distances per strategy for % of TP calculation
+    tp_by_strategy = {
+        "MNQ_V15": 7, "MNQ_VSCALPB": 3, "MNQ_VSCALPC": 25,
+        "MES_V2": 20,
+    }
+
+    results = []
+    for t in trades:
+        inst = t.get("instrument", "")
+        snap = levels_by_inst.get(inst)
+        if not snap:
+            continue
+
+        entry = t.get("entry_price", 0)
+        sid = t.get("strategy_id", "")
+        tp_pts = tp_by_strategy.get(sid, 10)
+        adr = snap.get("adr_value")  # None if unavailable
+
+        # Prior-day levels + VWAP + opening range
+        level_names = [
+            "prior_day_high", "prior_day_low", "prior_day_vpoc",
+            "prior_day_vah", "prior_day_val",
+            "vwap_close", "opening_range_high", "opening_range_low",
+        ]
+        distances = []
+        for lname in level_names:
+            level_val = snap.get(lname)
+            if level_val is None:
+                continue
+            dist = round(entry - level_val, 2)
+            abs_dist = abs(dist)
+            # Clean display name
+            display = lname.replace("prior_day_", "").replace("opening_range_", "or_")
+            distances.append({
+                "level": display,
+                "level_price": level_val,
+                "distance_pts": dist,
+                "abs_distance_pts": abs_dist,
+                "pct_of_tp": round(abs_dist / tp_pts * 100, 1) if tp_pts > 0 else None,
+                "adr_normalized": round(abs_dist / adr, 3) if adr and adr > 0 else None,
+            })
+
+        # Sort by absolute distance
+        distances.sort(key=lambda x: x["abs_distance_pts"])
+
+        results.append({
+            "strategy_id": sid,
+            "instrument": inst,
+            "entry_price": entry,
+            "side": t.get("side"),
+            "pnl_net": t.get("pnl_net"),
+            "nearest_level": distances[0]["level"] if distances else None,
+            "nearest_distance_pts": distances[0]["abs_distance_pts"] if distances else None,
+            "nearest_pct_of_tp": distances[0]["pct_of_tp"] if distances else None,
+            "all_levels": distances,
+        })
+
+    return results
+
+
 # ── save_digest (not in TOOL_DISPATCH — handled by agent for metadata) ───
 
 def save_digest(client, *, date: str, digest_type: str, content: dict,
@@ -1001,4 +1489,9 @@ TOOL_DISPATCH = {
     "get_streak_status": get_streak_status,
     "get_runner_stats": get_runner_stats,
     "get_dow_performance": get_dow_performance,
+    # ── Forensic tools (Phase 4) ──
+    "get_sl_velocity": get_sl_velocity,
+    "get_entry_clustering": get_entry_clustering,
+    "get_near_gate_miss": get_near_gate_miss,
+    "get_level_proximity": get_level_proximity,
 }

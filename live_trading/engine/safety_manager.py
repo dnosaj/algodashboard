@@ -10,10 +10,12 @@ Replaces the inline SafetyManager from runner.py with:
 - EventBus status_change broadcasting on every mutation
 """
 
+import json
 import logging
 import math
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Optional
 from zoneinfo import ZoneInfo
 
@@ -118,6 +120,222 @@ class SafetyManager:
             if s.prior_day_level_buffer > 0:
                 self._prior_day_buffers[s.instrument] = s.prior_day_level_buffer
 
+        # Prior-day ATR gate (per instrument)
+        # Tracks daily ranges across ALL bars (not just RTH), computes Wilder ATR(14).
+        # Gate blocks entries when prior-day ATR < threshold.
+        self._atr_daily_tracking: dict[str, dict] = {}   # inst -> {date, high, low}
+        self._atr_daily_ranges: dict[str, list[float]] = {}  # inst -> list of daily ranges (last 20)
+        self._prior_day_atr_value: dict[str, float | None] = {}  # inst -> current ATR value
+        self._prior_day_atr_gate_prev: dict[str, bool] = {}
+        self._prior_day_atr_gate_current: dict[str, bool] = {}
+        self._prior_day_atr_thresholds: dict[str, float] = {}  # inst -> min threshold
+        self._ATR_PERIOD = 14
+        for s in config.strategies:
+            if s.prior_day_atr_min > 0:
+                inst = s.instrument
+                # Use lowest threshold if multiple strategies on same instrument
+                if inst not in self._prior_day_atr_thresholds or s.prior_day_atr_min < self._prior_day_atr_thresholds[inst]:
+                    self._prior_day_atr_thresholds[inst] = s.prior_day_atr_min
+
+        # ADR directional gate (per instrument)
+        # Tracks RTH session (open/high/low) + rolling ADR (simple mean of prior N daily ranges).
+        # Stores move_from_open / ADR ratio for directional gating in check_can_trade.
+        self._adr_rth_session: dict[str, dict] = {}        # inst -> {date, open, high, low, close}
+        self._adr_completed_ranges: dict[str, list[float]] = {}  # inst -> list of completed daily ranges
+        self._adr_value: dict[str, float | None] = {}      # inst -> current ADR value
+        self._adr_dir_ratio_prev: dict[str, float] = {}    # inst -> ratio at prev bar (used by check_can_trade)
+        self._adr_dir_ratio_current: dict[str, float] = {} # inst -> ratio at current bar
+        self._adr_lookback: dict[str, int] = {}             # inst -> lookback days
+        for s in config.strategies:
+            if s.adr_lookback_days > 0 and s.adr_directional_threshold > 0:
+                inst = s.instrument
+                if inst not in self._adr_lookback:
+                    self._adr_lookback[inst] = s.adr_lookback_days
+
+        # VWAP accumulation (RTH only, for gate_state_snapshots)
+        self._vwap_num: dict[str, float] = {}   # inst -> sum(typical_price * volume)
+        self._vwap_den: dict[str, float] = {}   # inst -> sum(volume)
+
+        # Opening range / Initial Balance (10:00-10:30 ET, first 30 min RTH)
+        self._or_high: dict[str, float | None] = {}
+        self._or_low: dict[str, float | None] = {}
+        self._or_finalized: dict[str, bool] = {}
+        self._OR_END_ET = 630  # 10:30 ET in minutes from midnight
+
+        # Load gate seed from pre-computed file (if available)
+        self._load_gate_seed()
+
+    # ------------------------------------------------------------------
+    # Gate seed loading (pre-computed from historical data)
+    # ------------------------------------------------------------------
+
+    _SEED_PATH = Path(__file__).resolve().parent.parent / "data" / "gate_seed.json"
+    _GATE_STATE_PATH = Path(__file__).resolve().parent.parent / "data" / "gate_state.json"
+
+    def _load_gate_seed(self) -> None:
+        """Load gate state from persisted live state or pre-computed seed.
+
+        Priority: gate_state.json (persisted from previous engine run) >
+                  gate_seed.json (pre-computed from databento CSVs) >
+                  fail-open (warm up from live data).
+
+        After startup, on_bar() accumulates new data naturally. State is
+        auto-persisted at each daily reset so the next startup is fresh.
+        """
+        if self._GATE_STATE_PATH.exists():
+            path = self._GATE_STATE_PATH
+            source = "persisted state"
+        elif self._SEED_PATH.exists():
+            path = self._SEED_PATH
+            source = "pre-computed seed"
+        else:
+            logger.info("[Safety] No gate state or seed file — gates will warm up from live data")
+            return
+
+        try:
+            with open(path) as f:
+                seed = json.load(f)
+        except (json.JSONDecodeError, OSError) as e:
+            logger.warning(f"[Safety] Failed to load gate {source}: {e}")
+            return
+
+        # Staleness check
+        saved_at_str = seed.pop("_saved_at", None)
+        if saved_at_str:
+            try:
+                saved_dt = datetime.fromisoformat(saved_at_str)
+                now_et = datetime.now(_ET)
+                age_days = (now_et.date() - saved_dt.astimezone(_ET).date()).days
+                if age_days > 5:
+                    logger.warning(
+                        f"[Safety] Gate {source} is {age_days} days old — "
+                        f"gate values may be stale until first full trading day"
+                    )
+                logger.info(f"[Safety] Loading gate {source} (age: {age_days} day{'s' if age_days != 1 else ''})")
+            except (ValueError, TypeError):
+                logger.info(f"[Safety] Loading gate {source}")
+        else:
+            logger.info(f"[Safety] Loading gate {source} (no timestamp)")
+
+        for inst, data in seed.items():
+            if not isinstance(data, dict):
+                continue
+
+            # --- ADR directional gate ---
+            if inst in self._adr_lookback and "adr_completed_ranges" in data:
+                self._adr_completed_ranges[inst] = data["adr_completed_ranges"]
+                self._adr_value[inst] = data.get("adr_value")
+                if data.get("last_rth_date"):
+                    self._adr_rth_session[inst] = {
+                        "date": None, "open": None, "high": None, "low": None, "close": None,
+                    }
+                logger.info(
+                    f"[Safety] ADR seed for {inst}: ADR={data.get('adr_value')}, "
+                    f"{len(data['adr_completed_ranges'])} daily ranges"
+                )
+
+            # --- Prior-day ATR gate ---
+            if inst in self._prior_day_atr_thresholds and "atr_daily_ranges" in data:
+                self._atr_daily_ranges[inst] = data["atr_daily_ranges"]
+                self._prior_day_atr_value[inst] = data.get("atr_value")
+                self._atr_daily_tracking[inst] = {"date": None, "high": None, "low": None}
+                atr_val = data.get("atr_value")
+                if atr_val is not None:
+                    threshold = self._prior_day_atr_thresholds[inst]
+                    gate_ok = atr_val >= threshold
+                    self._prior_day_atr_gate_current[inst] = gate_ok
+                    self._prior_day_atr_gate_prev[inst] = gate_ok
+                    logger.info(
+                        f"[Safety] ATR seed for {inst}: ATR={atr_val:.1f}, "
+                        f"threshold={threshold:.1f}, gate={'OPEN' if gate_ok else 'BLOCKED'}"
+                    )
+
+            # --- Prior-day level gate ---
+            if inst in self._prior_day_buffers and "prior_day_levels" in data:
+                levels = data["prior_day_levels"]
+                self._prior_day_levels[inst] = levels
+                self._current_rth[inst] = {
+                    "date": None, "high": None, "low": None,
+                    "closes": [], "volumes": [],
+                }
+                logger.info(
+                    f"[Safety] Prior-day levels seed for {inst}: "
+                    f"H={levels.get('high')} L={levels.get('low')} "
+                    f"VPOC={levels.get('vpoc')}"
+                )
+
+            # --- Leledc gate ---
+            if inst in self._leledc_thresholds and "leledc_closes" in data:
+                closes = data["leledc_closes"]
+                self._leledc_closes[inst] = closes
+                threshold = self._leledc_thresholds[inst]
+                bull_count = 0
+                bear_count = 0
+                lookback = self._LELEDC_LOOKBACK
+                for i in range(lookback, len(closes)):
+                    curr = closes[i]
+                    prev = closes[i - lookback]
+                    bull_count = (bull_count + 1) if curr > prev else 0
+                    bear_count = (bear_count + 1) if curr < prev else 0
+                self._leledc_bull_count[inst] = bull_count
+                self._leledc_bear_count[inst] = bear_count
+                exhausted = bull_count >= threshold or bear_count >= threshold
+                self._leledc_gate_current[inst] = not exhausted
+                self._leledc_gate_prev[inst] = not exhausted
+                logger.info(
+                    f"[Safety] Leledc seed for {inst}: bull={bull_count}, "
+                    f"bear={bear_count}, gate={'BLOCKED' if exhausted else 'OPEN'}"
+                )
+
+        logger.info(f"[Safety] Gate data loaded from {source}")
+
+    def _save_gate_state(self) -> None:
+        """Persist current gate state to disk for next startup.
+
+        Called at daily reset. Saves ADR ranges, ATR, prior-day levels, and
+        leledc state so the next engine startup has fresh gate values without
+        needing the original seed file or manual intervention.
+        """
+        state: dict = {"_saved_at": datetime.now(_ET).isoformat()}
+
+        instruments: set[str] = set()
+        instruments.update(self._adr_completed_ranges.keys())
+        instruments.update(self._atr_daily_ranges.keys())
+        instruments.update(self._prior_day_levels.keys())
+        instruments.update(self._leledc_closes.keys())
+
+        for inst in instruments:
+            d: dict = {}
+
+            if inst in self._adr_completed_ranges:
+                d["adr_completed_ranges"] = [round(r, 2) for r in self._adr_completed_ranges[inst]]
+                adr = self._adr_value.get(inst)
+                d["adr_value"] = round(adr, 2) if adr is not None else None
+
+            if inst in self._atr_daily_ranges:
+                d["atr_daily_ranges"] = [round(r, 2) for r in self._atr_daily_ranges[inst]]
+                atr = self._prior_day_atr_value.get(inst)
+                d["atr_value"] = round(atr, 2) if atr is not None else None
+
+            if inst in self._prior_day_levels:
+                d["prior_day_levels"] = self._prior_day_levels[inst]
+
+            if inst in self._leledc_closes:
+                d["leledc_closes"] = [round(c, 4) for c in self._leledc_closes[inst]]
+
+            session = self._adr_rth_session.get(inst, {})
+            d["last_rth_date"] = str(session.get("date", "")) if session.get("date") else None
+
+            state[inst] = d
+
+        try:
+            self._GATE_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+            with open(self._GATE_STATE_PATH, "w") as f:
+                json.dump(state, f, indent=2)
+            logger.info(f"[Safety] Gate state persisted ({len(instruments)} instruments)")
+        except OSError as e:
+            logger.warning(f"[Safety] Failed to save gate state: {e}")
+
     # ------------------------------------------------------------------
     # Event bus handlers (registered externally)
     # ------------------------------------------------------------------
@@ -140,9 +358,33 @@ class SafetyManager:
         # Swap prev ← current BEFORE updating current
         self._leledc_gate_prev[inst] = self._leledc_gate_current.get(inst, True)
         self._prior_day_gate_prev[inst] = self._prior_day_gate_current.get(inst, True)
+        self._prior_day_atr_gate_prev[inst] = self._prior_day_atr_gate_current.get(inst, True)
+        self._adr_dir_ratio_prev[inst] = self._adr_dir_ratio_current.get(inst, 0.0)
 
         self._update_leledc(bar)
         self._update_prior_day_tracking(bar)
+        self._update_prior_day_atr(bar)
+        self._update_adr_directional(bar)
+
+        # VWAP + Opening Range accumulation (RTH only)
+        bar_et = bar.timestamp.astimezone(_ET)
+        et_mins = bar_et.hour * 60 + bar_et.minute
+        if self._RTH_OPEN_ET <= et_mins < self._RTH_CLOSE_ET:
+            # VWAP: accumulate typical_price * volume (skip zero-volume bars)
+            if bar.volume > 0:
+                tp = (bar.high + bar.low + bar.close) / 3
+                self._vwap_num[inst] = self._vwap_num.get(inst, 0.0) + tp * bar.volume
+                self._vwap_den[inst] = self._vwap_den.get(inst, 0.0) + bar.volume
+            # Opening range: first 30 min of RTH (10:00-10:30 ET)
+            if et_mins < self._OR_END_ET and not self._or_finalized.get(inst, False):
+                if self._or_high.get(inst) is None:
+                    self._or_high[inst] = bar.high
+                    self._or_low[inst] = bar.low
+                else:
+                    self._or_high[inst] = max(self._or_high[inst], bar.high)
+                    self._or_low[inst] = min(self._or_low[inst], bar.low)
+            elif et_mins >= self._OR_END_ET and not self._or_finalized.get(inst, False):
+                self._or_finalized[inst] = True
 
     # ------------------------------------------------------------------
     # Entry gate update methods (called from on_bar, deduplicated)
@@ -238,6 +480,149 @@ class SafetyManager:
                 self._prior_day_gate_current[inst] = False
                 return
         self._prior_day_gate_current[inst] = True
+
+    def _update_prior_day_atr(self, bar: Bar) -> None:
+        """Track daily ranges and compute Wilder ATR(14) for entry gating.
+
+        Tracks high/low across ALL bars (not just RTH) per calendar date.
+        On date change, finalizes prior day's range and updates ATR.
+        Gate: blocks entries when prior-day ATR < threshold.
+        Fail-open during warmup (first ATR_PERIOD days).
+        """
+        inst = bar.instrument
+        if inst not in self._prior_day_atr_thresholds:
+            return
+
+        bar_et = bar.timestamp.astimezone(_ET)
+        bar_date = bar_et.date()
+
+        if inst not in self._atr_daily_tracking:
+            self._atr_daily_tracking[inst] = {"date": None, "high": None, "low": None}
+            self._atr_daily_ranges[inst] = []
+            self._prior_day_atr_value[inst] = None
+
+        tracking = self._atr_daily_tracking[inst]
+
+        # New calendar date → finalize previous day's range and update ATR
+        if tracking["date"] is not None and bar_date != tracking["date"]:
+            if tracking["high"] is not None and tracking["low"] is not None:
+                day_range = tracking["high"] - tracking["low"]
+                ranges = self._atr_daily_ranges[inst]
+                ranges.append(day_range)
+                # Keep last 20 days (more than enough for ATR(14))
+                if len(ranges) > 20:
+                    ranges[:] = ranges[-20:]
+
+                # Compute Wilder ATR
+                period = self._ATR_PERIOD
+                if len(ranges) >= period:
+                    if len(ranges) == period:
+                        # Seed: simple mean of first `period` ranges
+                        atr = sum(ranges) / period
+                    else:
+                        # Wilder: ATR = (prev_ATR * (period-1) + new_range) / period
+                        prev_atr = self._prior_day_atr_value[inst]
+                        if prev_atr is not None:
+                            atr = (prev_atr * (period - 1) + day_range) / period
+                        else:
+                            atr = sum(ranges[-period:]) / period
+                    self._prior_day_atr_value[inst] = atr
+                    logger.info(
+                        f"[Safety] Prior-day ATR for {inst}: {atr:.1f} "
+                        f"(range={day_range:.1f}, days={len(ranges)})"
+                    )
+
+            # Reset for new day
+            tracking["high"] = None
+            tracking["low"] = None
+
+        tracking["date"] = bar_date
+
+        # Track daily high/low across ALL bars
+        if tracking["high"] is None:
+            tracking["high"] = bar.high
+            tracking["low"] = bar.low
+        else:
+            tracking["high"] = max(tracking["high"], bar.high)
+            tracking["low"] = min(tracking["low"], bar.low)
+
+        # Gate: check prior-day ATR vs threshold
+        atr_val = self._prior_day_atr_value.get(inst)
+        if atr_val is None:
+            self._prior_day_atr_gate_current[inst] = True  # fail-open during warmup
+        else:
+            threshold = self._prior_day_atr_thresholds[inst]
+            self._prior_day_atr_gate_current[inst] = atr_val >= threshold
+
+    def _update_adr_directional(self, bar: Bar) -> None:
+        """Track RTH session and compute ADR directional gate ratio.
+
+        Session tracking: RTH 10:00-16:00 ET only (matches backtest adr_common.py).
+        ADR: rolling N-day simple mean of prior completed RTH daily ranges.
+        Stores move_from_open / ADR ratio; directional check deferred to check_can_trade
+        (which knows the entry side).
+
+        Fail-open: ratio = 0.0 during warmup or outside RTH (won't trigger any block).
+        """
+        inst = bar.instrument
+        if inst not in self._adr_lookback:
+            return
+
+        bar_et = bar.timestamp.astimezone(_ET)
+        et_mins = bar_et.hour * 60 + bar_et.minute
+        bar_date = bar_et.date()
+
+        if inst not in self._adr_rth_session:
+            self._adr_rth_session[inst] = {"date": None, "open": None, "high": None, "low": None, "close": None}
+            self._adr_completed_ranges[inst] = []
+            self._adr_value[inst] = None
+
+        session = self._adr_rth_session[inst]
+
+        # New calendar date → finalize previous day's RTH range and update ADR
+        if session["date"] is not None and bar_date != session["date"]:
+            if session["high"] is not None and session["low"] is not None:
+                day_range = session["high"] - session["low"]
+                ranges = self._adr_completed_ranges[inst]
+                ranges.append(day_range)
+                if len(ranges) > 30:
+                    ranges[:] = ranges[-30:]
+
+                # Compute ADR as simple rolling mean of prior N days
+                lookback = self._adr_lookback[inst]
+                if len(ranges) >= lookback:
+                    self._adr_value[inst] = sum(ranges[-lookback:]) / lookback
+                    logger.info(
+                        f"[Safety] ADR for {inst}: {self._adr_value[inst]:.1f} "
+                        f"(range={day_range:.1f}, lb={lookback}, days={len(ranges)})"
+                    )
+
+            # Reset session for new day
+            session["open"] = None
+            session["high"] = None
+            session["low"] = None
+            session["close"] = None
+
+        session["date"] = bar_date
+
+        # Track RTH bars only (10:00-16:00 ET)
+        if self._RTH_OPEN_ET <= et_mins < self._RTH_CLOSE_ET:
+            if session["open"] is None:
+                session["open"] = bar.open
+                session["high"] = bar.high
+                session["low"] = bar.low
+            else:
+                session["high"] = max(session["high"], bar.high)
+                session["low"] = min(session["low"], bar.low)
+            session["close"] = bar.close  # Last RTH bar close = RTH close
+
+        # Compute ratio: move_from_open / ADR
+        adr_val = self._adr_value.get(inst)
+        if session["open"] is not None and adr_val is not None and adr_val > 0:
+            move = bar.close - session["open"]
+            self._adr_dir_ratio_current[inst] = move / adr_val
+        else:
+            self._adr_dir_ratio_current[inst] = 0.0  # fail-open
 
     def _finalize_prior_day(self, inst: str) -> None:
         """Compute prior-day levels from collected RTH data and reset tracking."""
@@ -460,8 +845,13 @@ class SafetyManager:
     # Trade gating
     # ------------------------------------------------------------------
 
-    def check_can_trade(self, instrument: str, qty: int, strategy_id: str = "") -> tuple[bool, str]:
-        """Check if a trade is allowed. Returns (ok, reason)."""
+    def check_can_trade(self, instrument: str, qty: int, strategy_id: str = "",
+                        side: str = "") -> tuple[bool, str]:
+        """Check if a trade is allowed. Returns (ok, reason).
+
+        Args:
+            side: "long" or "short" — needed for directional gates (ADR).
+        """
         if self._halted:
             return False, f"Engine halted: {self._halt_reason}"
 
@@ -510,6 +900,39 @@ class SafetyManager:
                             f"Near prior-day level (buf={cfg.prior_day_level_buffer}): "
                             f"H={levels.get('high', '?')} L={levels.get('low', '?')} "
                             f"VPOC={levels.get('vpoc', '?')}"
+                        )
+
+        # Prior-day ATR gate
+        if strategy_id:
+            cfg = self._strategy_configs.get(strategy_id)
+            if cfg and cfg.prior_day_atr_min > 0:
+                strat = self._strategies.get(strategy_id)
+                if strat and not strat.manual_override:
+                    if not self._prior_day_atr_gate_prev.get(strat.instrument, True):
+                        atr_val = self._prior_day_atr_value.get(strat.instrument)
+                        return False, (
+                            f"Prior-day ATR too low: {atr_val:.1f} < {cfg.prior_day_atr_min:.1f}"
+                            if atr_val is not None else
+                            f"Prior-day ATR gate: warmup (need {self._ATR_PERIOD} days)"
+                        )
+
+        # ADR directional gate
+        if strategy_id and side:
+            cfg = self._strategy_configs.get(strategy_id)
+            if cfg and cfg.adr_directional_threshold > 0 and cfg.adr_lookback_days > 0:
+                strat = self._strategies.get(strategy_id)
+                if strat and not strat.manual_override:
+                    ratio = self._adr_dir_ratio_prev.get(strat.instrument, 0.0)
+                    thr = cfg.adr_directional_threshold
+                    if side == "long" and ratio >= thr:
+                        return False, (
+                            f"ADR directional: ratio {ratio:.2f} >= {thr} "
+                            f"(long blocked — rally already {ratio:.0%} of ADR)"
+                        )
+                    elif side == "short" and ratio <= -thr:
+                        return False, (
+                            f"ADR directional: ratio {ratio:.2f} <= -{thr} "
+                            f"(short blocked — selloff already {abs(ratio):.0%} of ADR)"
                         )
 
         # Position size check
@@ -685,6 +1108,16 @@ class SafetyManager:
         self._halted = False
         self._halt_reason = ""
 
+        # 6. Reset VWAP + Opening Range accumulators for next day
+        self._vwap_num.clear()
+        self._vwap_den.clear()
+        self._or_high.clear()
+        self._or_low.clear()
+        self._or_finalized.clear()
+
+        # 7. Persist gate state for next startup
+        self._save_gate_state()
+
         logger.info("[Safety] Daily counters reset")
         self._broadcast_status()
 
@@ -771,6 +1204,25 @@ class SafetyManager:
                     and not self._prior_day_gate_prev.get(strat.instrument, True)
                     and not strat.manual_override
                 ),
+                "atr_gated": (
+                    cfg is not None
+                    and cfg.prior_day_atr_min > 0
+                    and not self._prior_day_atr_gate_prev.get(strat.instrument, True)
+                    and not strat.manual_override
+                ),
+                "adr_dir_gated": (
+                    cfg is not None
+                    and cfg.adr_directional_threshold > 0
+                    and not strat.manual_override
+                    and (lambda r, t: abs(r) >= t)(
+                        self._adr_dir_ratio_prev.get(strat.instrument, 0.0),
+                        cfg.adr_directional_threshold if cfg else 0.0,
+                    )
+                ),
+                "adr_dir_ratio": (
+                    round(self._adr_dir_ratio_prev.get(strat.instrument, 0.0), 3)
+                    if cfg and cfg.adr_directional_threshold > 0 else None
+                ),
             }
 
         return {
@@ -790,6 +1242,14 @@ class SafetyManager:
             "prior_day_levels": {
                 inst: {k: round(v, 2) if v is not None else None for k, v in lvls.items()}
                 for inst, lvls in self._prior_day_levels.items()
+            },
+            "prior_day_atr": {
+                inst: round(atr, 1) if atr is not None else None
+                for inst, atr in self._prior_day_atr_value.items()
+            },
+            "adr": {
+                inst: round(adr, 1) if adr is not None else None
+                for inst, adr in self._adr_value.items()
             },
             "strategies": strategies,
         }

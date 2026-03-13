@@ -373,6 +373,9 @@ class IncrementalRSI5m:
 # Main Incremental Strategy
 # ---------------------------------------------------------------------------
 
+_MARKET_OPEN_ET = 9 * 60 + 30  # 9:30 AM ET in minutes from midnight
+
+
 @dataclass
 class TradeState:
     """Internal trade state."""
@@ -391,6 +394,28 @@ class TradeState:
     # Partial exit state (scale-out)
     qty_remaining: int = 1       # Contracts still open
     partial_filled: bool = False # True after TP1 partial exit
+    partial_pnl_accum: float = 0.0  # Accumulated P&L from partial exits (for streak calc)
+    # MAE tracking (worst adverse excursion in points, always <= 0 for losing)
+    min_adverse: float = 0.0
+    # Entry context (captured at open for later use in TradeRecord)
+    entry_sm_value: float = 0.0
+    entry_sm_velocity: float = 0.0
+    entry_rsi_value: float = 0.0
+    entry_bar_volume: float = 0.0
+    entry_minutes_from_open: int = 0
+    entry_bar_range: float = 0.0
+    # Concurrent open positions at entry (injected by runner after fill)
+    concurrent_positions: int = 0
+    # Win/loss streak at entry (positive=win streak, negative=loss streak)
+    streak_at_entry: int = 0
+    # Gate state at entry (injected by runner after fill)
+    gate_vix_close: Optional[float] = None
+    gate_leledc_active: Optional[bool] = None
+    gate_atr_value: Optional[float] = None
+    gate_adr_ratio: Optional[float] = None
+    gate_leledc_count: Optional[int] = None
+    # Trade group ID (links partial + runner legs)
+    trade_group_id: Optional[str] = None
 
 
 class IncrementalStrategy:
@@ -439,6 +464,9 @@ class IncrementalStrategy:
         # Sizing overrides (set via dashboard, cleared on force_resume/daily_reset)
         self._entry_qty_override: Optional[int] = None
         self._partial_qty_override: Optional[int] = None
+
+        # Win/loss streak tracker (positive = consecutive wins, negative = consecutive losses)
+        self._streak: int = 0
 
         # Per-strategy lock serializes: monitor exit, bar-close exit, manual exit
         self.trade_lock = asyncio.Lock()
@@ -519,6 +547,17 @@ class IncrementalStrategy:
         # Emit bar event
         if self.event_bus:
             self.event_bus.emit("bar", bar)
+
+        # ------------------------------------------------------------------
+        # Track MAE (all modes, all bars while positioned, uses prev_bar)
+        # ------------------------------------------------------------------
+        if self.state.position != 0 and prev_bar is not None:
+            if self.state.position == 1:
+                excursion = prev_bar.close - self.state.entry_price
+            else:
+                excursion = self.state.entry_price - prev_bar.close
+            if excursion < self.state.min_adverse:
+                self.state.min_adverse = excursion
 
         # ------------------------------------------------------------------
         # Signal computation using previous-bar data
@@ -652,6 +691,19 @@ class IncrementalStrategy:
         self.state.entry_bar_idx = self.bar_idx
         self.state.qty_remaining = self.active_entry_qty
         self.state.partial_filled = False
+        self.state.min_adverse = 0.0
+
+        # Generate trade group ID for linking partial + runner legs
+        self.state.trade_group_id = f"{self.strategy_id}_{bar.timestamp.isoformat()}"
+
+        # Capture entry context for TradeRecord enrichment
+        self.state.entry_sm_value = sm_val
+        self.state.entry_sm_velocity = sm_val - self.state.sm_prev2
+        self.state.entry_rsi_value = rsi_val
+        self.state.entry_bar_volume = bar.volume
+        self.state.entry_minutes_from_open = _et_minutes_from_datetime(bar.timestamp) - _MARKET_OPEN_ET
+        self.state.entry_bar_range = round(bar.high - bar.low, 2)
+        self.state.streak_at_entry = self._streak
 
         if side == "long":
             self.state.long_used = True
@@ -701,12 +753,38 @@ class IncrementalStrategy:
             strategy_id=self.strategy_id,
             qty=qty,
             is_partial=True,
+            # Entry context
+            entry_sm_value=self.state.entry_sm_value,
+            entry_sm_velocity=self.state.entry_sm_velocity,
+            entry_rsi_value=self.state.entry_rsi_value,
+            entry_bar_volume=self.state.entry_bar_volume,
+            entry_minutes_from_open=self.state.entry_minutes_from_open,
+            entry_bar_range=self.state.entry_bar_range,
+            concurrent_positions=self.state.concurrent_positions,
+            streak_at_entry=self.state.streak_at_entry,
+            # Exit context
+            exit_sm_value=self.state.sm_prev,
+            exit_rsi_value=self.rsi.curr,
+            is_runner=False,  # This IS the TP1 leg, not a runner
+            # Gate state at entry (injected by runner into TradeState)
+            gate_vix_close=self.state.gate_vix_close,
+            gate_leledc_active=self.state.gate_leledc_active,
+            gate_atr_value=self.state.gate_atr_value,
+            gate_adr_ratio=self.state.gate_adr_ratio,
+            gate_leledc_count=self.state.gate_leledc_count,
+            # MFE/MAE
+            mfe_pts=round(self.state.max_favorable, 2),
+            mae_pts=round(self.state.min_adverse, 2),
+            # Trade grouping + slippage
+            trade_group_id=self.state.trade_group_id,
+            signal_price=self.state.entry_price,  # Entry was at bar.open
         )
         self.trades.append(trade)
 
-        # Decrement qty, mark partial filled. Do NOT reset position/exit_bar_idx/MFE/trail.
+        # Decrement qty, mark partial filled. Accumulate P&L for streak calculation.
         self.state.qty_remaining -= qty
         self.state.partial_filled = True
+        self.state.partial_pnl_accum += pnl
 
         if self.event_bus:
             self.event_bus.emit("trade_closed", trade)
@@ -752,17 +830,53 @@ class IncrementalStrategy:
             bars_held=self.bar_idx - self.state.entry_bar_idx,
             strategy_id=self.strategy_id,
             qty=qty,
+            # Entry context
+            entry_sm_value=self.state.entry_sm_value,
+            entry_sm_velocity=self.state.entry_sm_velocity,
+            entry_rsi_value=self.state.entry_rsi_value,
+            entry_bar_volume=self.state.entry_bar_volume,
+            entry_minutes_from_open=self.state.entry_minutes_from_open,
+            entry_bar_range=self.state.entry_bar_range,
+            concurrent_positions=self.state.concurrent_positions,
+            streak_at_entry=self.state.streak_at_entry,
+            # Exit context
+            exit_sm_value=self.state.sm_prev,
+            exit_rsi_value=self.rsi.curr,
+            is_runner=self.state.partial_filled,
+            # Gate state at entry (injected by runner into TradeState)
+            gate_vix_close=self.state.gate_vix_close,
+            gate_leledc_active=self.state.gate_leledc_active,
+            gate_atr_value=self.state.gate_atr_value,
+            gate_adr_ratio=self.state.gate_adr_ratio,
+            gate_leledc_count=self.state.gate_leledc_count,
+            # MFE/MAE
+            mfe_pts=round(self.state.max_favorable, 2),
+            mae_pts=round(self.state.min_adverse, 2),
+            # Trade grouping + slippage
+            trade_group_id=self.state.trade_group_id,
+            signal_price=self.state.entry_price,  # Entry was at bar.open
         )
         self.trades.append(trade)
+
+        # Update win/loss streak using combined P&L (partial + runner)
+        combined_pnl = pnl + self.state.partial_pnl_accum
+        if combined_pnl > 0:
+            self._streak = max(self._streak, 0) + 1
+        elif combined_pnl < 0:
+            self._streak = min(self._streak, 0) - 1
+        # combined_pnl == 0: streak stays unchanged
 
         # Reset position BEFORE emitting trade_closed so all subscribers
         # (SafetyManager, advisors) see position == 0 during their handlers.
         self.state.position = 0
         self.state.exit_bar_idx = self.bar_idx
         self.state.max_favorable = 0.0
+        self.state.min_adverse = 0.0
         self.state.trail_activated = False
         self.state.qty_remaining = 1
         self.state.partial_filled = False
+        self.state.partial_pnl_accum = 0.0
+        self.state.concurrent_positions = 0
 
         if self.event_bus:
             self.event_bus.emit("trade_closed", trade)
@@ -807,6 +921,7 @@ class IncrementalStrategy:
         self.state.qty_remaining = 1
         self.state.partial_filled = False
         self.state.max_favorable = 0.0
+        self.state.min_adverse = 0.0
         self.state.trail_activated = False
 
         # Undo long_used / short_used so the episode flag isn't consumed
@@ -836,4 +951,5 @@ class IncrementalStrategy:
             self.state.partial_filled = False
             self.state.qty_remaining = 1
             self.state.max_favorable = 0.0
+            self.state.min_adverse = 0.0
             self.state.trail_activated = False

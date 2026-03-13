@@ -77,6 +77,40 @@ class TradeRecord:
     qty: int = 1            # Contracts closed in this leg
     is_partial: bool = False # True for partial TP1 exit (position stays open)
 
+    # Entry context (populated by strategy._open_position)
+    entry_sm_value: Optional[float] = None
+    entry_sm_velocity: Optional[float] = None   # SM rate of change (sm[i-1] - sm[i-2])
+    entry_rsi_value: Optional[float] = None
+    entry_bar_volume: Optional[float] = None
+    entry_minutes_from_open: Optional[int] = None  # Minutes since 9:30 ET
+    entry_bar_range: Optional[float] = None  # bar high-low at entry
+    concurrent_positions: Optional[int] = None  # other open positions at entry
+    streak_at_entry: Optional[int] = None  # win/loss streak at entry (+win, -loss)
+
+    # Exit context (populated by strategy._close_position)
+    exit_sm_value: Optional[float] = None
+    exit_rsi_value: Optional[float] = None
+    is_runner: Optional[bool] = None  # True if TP1 already filled (this is the runner leg)
+
+    # Gate state snapshot at entry (captured in TradeState by runner after fill)
+    gate_vix_close: Optional[float] = None
+    gate_leledc_active: Optional[bool] = None
+    gate_atr_value: Optional[float] = None
+    gate_adr_ratio: Optional[float] = None
+    gate_leledc_count: Optional[int] = None
+
+    # MFE/MAE in points (populated by strategy)
+    mfe_pts: Optional[float] = None
+    mae_pts: Optional[float] = None
+
+    # Trade grouping (links TP1 partial + runner legs of same position)
+    trade_group_id: Optional[str] = None
+    # Signal price for slippage analysis (bar.open at signal time)
+    signal_price: Optional[float] = None
+
+    # Source: "live", "paper", "backtest"
+    source: str = "paper"
+
 
 @dataclass
 class PreOrderContext:

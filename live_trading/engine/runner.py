@@ -25,6 +25,7 @@ from engine.config import EngineConfig, StrategyConfig
 from engine.events import (
     Bar, EventBus, ExitReason, PreOrderContext, Signal, SignalType, TradeRecord,
 )
+from engine.db_logger import DbLogger
 from engine.intra_bar_monitor import IntraBarExitMonitor
 from engine.strategy import IncrementalStrategy
 from advisors.base import Advisor
@@ -311,6 +312,8 @@ class EngineState:
     tt_session: Optional[object] = None
     # Background VIX refetch task (daily reset)
     _vix_refetch_task: Optional[asyncio.Task] = None
+    # Database logger (Supabase)
+    db_logger: Optional[DbLogger] = None
 
 
 # ---------------------------------------------------------------------------
@@ -503,18 +506,29 @@ async def process_bar(
             ok, reason = state.safety.check_can_trade(
                 bar.instrument, current_exposure + context.qty,
                 strategy_id=sid,
+                side=side,
             )
             if not ok:
                 logger.warning(f"[Runner] Trade blocked by safety for {sid}: {reason}")
                 _log_blocked_signal(state, bar, sig, sid, side, reason)
-                state.event_bus.emit("signal_blocked", {
+                blocked_payload = {
                     "instrument": bar.instrument,
                     "strategy_id": sid,
                     "side": side,
                     "price": bar.close,
                     "time": bar.timestamp,
                     "reason": reason,
-                })
+                    "sm_value": sig.sm_value,
+                    "rsi_value": sig.rsi_value,
+                }
+                # Enrich with gate state from safety manager
+                if state.safety:
+                    blocked_payload["gate_vix_close"] = state.safety._vix_close
+                    blocked_payload["gate_atr_value"] = state.safety._prior_day_atr_value.get(bar.instrument)
+                    blocked_payload["gate_adr_ratio"] = state.safety._adr_dir_ratio_prev.get(bar.instrument)
+                    leledc_ok = state.safety._leledc_gate_prev.get(bar.instrument, True)
+                    blocked_payload["gate_leledc_active"] = not leledc_ok
+                state.event_bus.emit("signal_blocked", blocked_payload)
                 strategy.reject_entry()
                 return
 
@@ -551,6 +565,24 @@ async def process_bar(
             "instrument": bar.instrument,
             "strategy_id": sid,
         })
+
+        # Capture concurrent open positions at entry time
+        strategy.state.concurrent_positions = sum(
+            1 for s in state.strategies.values()
+            if s.position != 0 and s.strategy_id != sid
+        )
+
+        # Capture gate state at entry time into TradeState (before it changes)
+        if state.safety:
+            strategy.state.gate_vix_close = state.safety._vix_close
+            strategy.state.gate_atr_value = state.safety._prior_day_atr_value.get(bar.instrument)
+            strategy.state.gate_adr_ratio = state.safety._adr_dir_ratio_prev.get(bar.instrument)
+            leledc_gate_ok = state.safety._leledc_gate_prev.get(bar.instrument, True)
+            strategy.state.gate_leledc_active = not leledc_gate_ok
+            strategy.state.gate_leledc_count = max(
+                state.safety._leledc_bull_count.get(bar.instrument, 0),
+                state.safety._leledc_bear_count.get(bar.instrument, 0),
+            )
 
         # If ALL protection failed (OCO + fallback stop), halt the engine
         if hasattr(state.order_manager, 'pop_protection_failures'):
@@ -778,7 +810,13 @@ def _check_daily_reset(bar: Bar, state: EngineState) -> None:
         # 3. Update day tracker
         state.last_trading_day = today
 
-        # 4. Reset safety counters + strategy daily state (clears strat.trades)
+        # 4. Snapshot gate state before reset + refresh materialized views
+        if state.db_logger and state.safety:
+            state.db_logger.snapshot_gate_state(state.safety, prev_day)
+        if state.db_logger:
+            state.db_logger.refresh_views()
+
+        # 5. Reset safety counters + strategy daily state (clears strat.trades)
         if state.safety:
             state.safety.reset_daily()
             # Re-fetch VIX for new trading day
@@ -1548,6 +1586,20 @@ async def run(config: EngineConfig) -> None:
         safety._broadcast_status()
     event_bus.subscribe("trade_corrected", _on_trade_corrected)
 
+    # --- 5b. Trade context enrichment (source tag) ---
+    def _enrich_trade_source(trade):
+        """Tag TradeRecord with source (paper/live)."""
+        trade.source = "paper" if state.config.safety.paper_mode else "live"
+    event_bus.subscribe("trade_closed", _enrich_trade_source)
+
+    # --- 5c. Database logger (Supabase — optional) ---
+    db_logger = DbLogger(paper_mode=state.config.safety.paper_mode)
+    state.db_logger = db_logger
+    await db_logger.start()
+    event_bus.subscribe("trade_closed", db_logger.on_trade_closed)
+    event_bus.subscribe("trade_corrected", db_logger.on_trade_corrected)
+    event_bus.subscribe("signal_blocked", db_logger.on_signal_blocked)
+
     # --- 6. Create strategies (keyed by strategy_id, not instrument) ---
     for strat_config in config.strategies:
         strategy = IncrementalStrategy(strat_config, event_bus)
@@ -1654,6 +1706,10 @@ async def run(config: EngineConfig) -> None:
 
         # Wait for tasks to finish
         await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Stop database logger
+        if state.db_logger:
+            await state.db_logger.stop()
 
         # Disconnect
         await data_feed.disconnect()

@@ -40,6 +40,9 @@ class StrategyConfig:
     move_sl_to_be_after_tp1: bool = False  # After TP1 partial fill, move runner SL to entry price
     leledc_maj_qual: int = 0            # Leledc exhaustion threshold (0 = disabled)
     prior_day_level_buffer: float = 0.0 # Block within N pts of prior-day levels (0 = disabled)
+    prior_day_atr_min: float = 0.0    # Block when prior-day ATR(14) < threshold (0 = disabled)
+    adr_lookback_days: int = 0        # ADR lookback in trading days (0 = disabled)
+    adr_directional_threshold: float = 0.0  # Block entries chasing daily direction (0 = disabled)
     session_start_et: str = "10:00"   # RTH start (Eastern Time)
     session_end_et: str = "15:45"     # Last entry allowed
     session_close_et: str = "16:00"   # Force close all positions
@@ -48,7 +51,7 @@ class StrategyConfig:
 @dataclass
 class SafetyConfig:
     """Safety limits and circuit breakers."""
-    max_daily_loss: float = 600.0     # Max daily loss in dollars before halt
+    max_daily_loss: float = 650.0     # Max daily loss in dollars before halt (raised from 600: A1+B1+C2+MES2 worst-case=$619)
     max_position_size: int = 5        # Max contracts per instrument
     max_consecutive_losses: int = 5   # Consecutive losses before pause
     heartbeat_timeout_sec: int = 90   # Alert if no data for this long (polls every 60s)
@@ -128,8 +131,8 @@ MNQ_V15 = StrategyConfig(
     sm_index=10, sm_flow=12, sm_norm=200, sm_ema=100,
     sm_threshold=0.0,  # v15 validated with threshold=0 on TV
     exit_mode="tp_scalp",
-    tp_pts=5,
-    trail_activate_pts=5,
+    tp_pts=7,             # Upgraded from 5: Sharpe 2.73 vs 2.08, PF 1.36 vs 1.29, IS/OOS STRONG
+    trail_activate_pts=7,
     trail_distance_pts=8,
     rsi_len=8, rsi_buy=60, rsi_sell=40,
     cooldown=20, max_loss_pts=40,
@@ -138,6 +141,8 @@ MNQ_V15 = StrategyConfig(
     vix_death_zone_min=19.0,
     vix_death_zone_max=22.0,
     leledc_maj_qual=9,  # Block entry on Leledc exhaustion (9+ consecutive directional closes)
+    adr_lookback_days=14,             # ADR directional gate: 14-day lookback (STRONG PASS on V15+vScalpC)
+    adr_directional_threshold=0.3,    # Block when move_from_open/ADR >= 0.3 in entry direction
     session_end_et="13:00",  # Late-day cutoff: entries after 13:00 ET are net negative
 )
 
@@ -147,14 +152,16 @@ MNQ_VSCALPB = StrategyConfig(
     sm_index=10, sm_flow=12, sm_norm=200, sm_ema=100,
     sm_threshold=0.25,  # High-conviction entries only
     exit_mode="tp_scalp",
-    tp_pts=5,
-    trail_activate_pts=5,
+    tp_pts=3,             # Upgraded from 5: Sharpe 3.29 vs 1.49, PF 1.47 vs 1.19, IS/OOS STRONG
+    trail_activate_pts=3,
     trail_distance_pts=8,
     rsi_len=8, rsi_buy=55, rsi_sell=45,  # Tighter bands than vScalpA
-    cooldown=20, max_loss_pts=15,  # Tight stop: wrong fast = out fast
+    cooldown=20, max_loss_pts=10,  # Upgraded from 15: tighter SL matches tighter TP
     dollar_per_pt=2.0,
     max_strategy_daily_loss=100.0,
     leledc_maj_qual=9,  # Block entry on Leledc exhaustion (9+ consecutive directional closes)
+    adr_lookback_days=14,             # ADR directional gate: 14-day lookback
+    adr_directional_threshold=0.3,    # Block when move_from_open/ADR >= 0.3 in entry direction
 )
 
 # MES v9.4 -- REPLACED by MES_V2 (TP=20 exit). Kept for reference.
@@ -190,6 +197,9 @@ MNQ_VSCALPC = StrategyConfig(
     vix_death_zone_min=19.0,   # Same VIX gate as V15 (same entries)
     vix_death_zone_max=22.0,
     leledc_maj_qual=9,  # Block entry on Leledc exhaustion (9+ consecutive directional closes)
+    prior_day_atr_min=263.8,   # Block on low-vol days (ATR < p20). Phase 2 sweep (ET dates): IS PF +10%, OOS PF +13%
+    adr_lookback_days=14,             # ADR directional gate: 14-day lookback (STRONG PASS)
+    adr_directional_threshold=0.3,    # Block when move_from_open/ADR >= 0.3 in entry direction
     session_end_et="13:00",  # Same late-day cutoff as V15
 )
 
@@ -207,7 +217,7 @@ MES_V2 = StrategyConfig(
     dollar_per_pt=5.0,
     commission_per_side=1.25,
     entry_qty=2,           # 2 contracts: partial at TP1, runner to TP2
-    partial_tp_pts=10,     # TP1: close 1 contract at +10 pts ($50)
+    partial_tp_pts=6,      # TP1: close 1 contract at +6 pts ($30) — swept Mar 11: PF +8.2%, Sharpe +28%, TP1 fill 39%→60%
     partial_qty=1,         # Close 1 of 2 at TP1
     breakeven_after_bars=75,   # Close stale trades after 75 bars (~1h15m)
     max_strategy_daily_loss=400.0,    # One 2-contract SL is ~$355; $400 allows recovery
