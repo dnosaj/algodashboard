@@ -146,7 +146,7 @@ TOOL_DEFINITIONS = [
                         "- runner_summary: {tp1_fills, runners_profitable, runners_be_time, runners_sl} (if applicable)\n"
                         "- tomorrow_outlook: {vix, atr, levels, watchlist}\n"
                         "\nFor Morning:\n"
-                        "- traffic_light: {color, reasons}\n"
+                        "- status_snapshot: {week_pnl, month_pnl, consecutive_days, drift_zscores, drawdown_pcts}\n"
                         "- yesterday_recap: {pnl, headline, key_events}\n"
                         "- gate_status: {vix, atr, adr, leledc, prior_day_levels}\n"
                         "- system_health: [{strategy_id, drift_status, rolling_wr, drawdown_pct}]\n"
