@@ -128,6 +128,19 @@ export function useWebSocket(url: string): UseWebSocketReturn {
           case 'signal_blocked': {
             const blocked = message.data as unknown as BlockedSignal;
             setBlockedSignals((prev) => [blocked, ...prev].slice(0, 200));
+            // Also add to signal feed so blocked entries show in Signal Activity
+            const blockedSig: SignalEvent = {
+              type: blocked.side === 'BUY' ? 'BUY' : 'SELL',
+              instrument: blocked.instrument,
+              reason: blocked.reason || '',
+              sm_value: (message.data.sm_value as number) || 0,
+              rsi_value: (message.data.rsi_value as number) || 0,
+              ts: message.ts,
+              blocked: true,
+              block_reason: blocked.reason || '',
+              strategy_id: blocked.strategy_id,
+            };
+            setSignals((prev) => [blockedSig, ...prev].slice(0, MAX_SIGNALS));
             break;
           }
 

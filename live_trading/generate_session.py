@@ -52,7 +52,7 @@ VSCALPA_RSI_SELL = 40
 VSCALPA_SM_THRESHOLD = 0.0
 VSCALPA_COOLDOWN = 20
 VSCALPA_MAX_LOSS_PTS = 40
-VSCALPA_TP_PTS = 5
+VSCALPA_TP_PTS = 7  # Upgraded Mar 10: Sharpe 2.73 vs 2.08, PF 1.36 vs 1.29
 VSCALPA_ENTRY_END_ET = 13 * 60  # 13:00 ET — late-day entries are net negative
 
 # vScalpB params
@@ -61,8 +61,8 @@ VSCALPB_RSI_BUY = 55
 VSCALPB_RSI_SELL = 45
 VSCALPB_SM_THRESHOLD = 0.25
 VSCALPB_COOLDOWN = 20
-VSCALPB_MAX_LOSS_PTS = 15
-VSCALPB_TP_PTS = 5
+VSCALPB_MAX_LOSS_PTS = 10  # Upgraded Mar 10: tighter SL matches tighter TP
+VSCALPB_TP_PTS = 3   # Upgraded Mar 10: Sharpe 3.29 vs 1.49, PF 1.47 vs 1.19
 
 # --- MES SM params ---
 MES_SM_INDEX = 20

@@ -1,7 +1,7 @@
 """
 Run active portfolio strategies on full 12-month data and save trade logs.
 
-Runs vScalpA (v15), vScalpB, and MES v2 on Databento 1-min bars with
+Runs vScalpA (v15), vScalpB, vScalpC, and MES v2 on Databento 1-min bars with
 production parameters. Saves per-trade CSVs to backtesting_engine/results/.
 
 Usage:
@@ -54,9 +54,17 @@ from generate_session import (
     MESV2_MAX_LOSS_PTS, MESV2_TP_PTS, MESV2_EOD_ET, MESV2_BREAKEVEN_BARS,
 )
 
+from vscalpc_partial_exit_sweep import run_backtest_partial_exit
 from results.save_results import save_backtest
 
 SCRIPT_NAME = "run_and_save_portfolio.py"
+
+# vScalpC production params (same entries as V15, partial exit runner)
+VSCALPC_TP1_PTS = 7     # Scalp leg: close 1 contract at +7 pts
+VSCALPC_TP2_PTS = 25    # Runner leg: target +25 pts
+VSCALPC_SL_PTS = 40     # Same SL as V15
+VSCALPC_SL_TO_BE = True  # Move runner SL to entry after TP1
+VSCALPC_BE_TIME = 45     # Close stale runners after 45 bars
 
 
 def run_strategy(name, strategy_id, opens, highs, lows, closes, sm, times,
@@ -97,6 +105,43 @@ def run_strategy(name, strategy_id, opens, highs, lows, closes, sm, times,
     return trades, sc
 
 
+def run_partial_strategy(name, strategy_id, opens, highs, lows, closes, sm,
+                         times, rsi_curr, rsi_prev, rsi_buy, rsi_sell,
+                         sm_threshold, cooldown, sl_pts, tp1_pts, tp2_pts,
+                         dollar_per_pt, commission, params_dict, data_range,
+                         split="FULL", entry_end_et=None, sl_to_be=False,
+                         be_time_bars=0):
+    """Run a partial exit strategy (2 contracts) and save results."""
+    kwargs = {}
+    if entry_end_et is not None:
+        kwargs["entry_end_et"] = entry_end_et
+
+    trades = run_backtest_partial_exit(
+        opens, highs, lows, closes, sm, times,
+        rsi_curr, rsi_prev,
+        rsi_buy=rsi_buy, rsi_sell=rsi_sell,
+        sm_threshold=sm_threshold, cooldown_bars=cooldown,
+        sl_pts=sl_pts, tp1_pts=tp1_pts, tp2_pts=tp2_pts,
+        sl_to_be_after_tp1=sl_to_be, be_time_bars=be_time_bars,
+        **kwargs,
+    )
+    compute_mfe_mae(trades, highs, lows)
+
+    # 2 contracts: pass commission*2 so score_trades deducts 4×commission total
+    sc = score_trades(trades, commission_per_side=commission * 2,
+                      dollar_per_pt=dollar_per_pt)
+    label = f"{name} ({split})"
+    print(f"\n  {fmt_score(sc, label)}")
+
+    save_backtest(
+        trades, strategy=strategy_id, params=params_dict,
+        data_range=data_range, split=split,
+        dollar_per_pt=dollar_per_pt, commission=commission,
+        script_name=SCRIPT_NAME, qty=2,
+    )
+    return trades, sc
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--split", action="store_true",
@@ -104,7 +149,7 @@ def main():
     args = parser.parse_args()
 
     print("=" * 70)
-    print("PORTFOLIO BACKTEST — vScalpA + vScalpB + MES v2")
+    print("PORTFOLIO BACKTEST — vScalpA + vScalpB + vScalpC + MES v2")
     print("=" * 70)
 
     # --- Load MNQ ---
@@ -214,6 +259,29 @@ def main():
             VSCALPB_COOLDOWN, VSCALPB_MAX_LOSS_PTS, VSCALPB_TP_PTS,
             MNQ_DOLLAR_PER_PT, MNQ_COMMISSION,
             vscalpb_params, dr, split_name,
+        )
+
+        # --- vScalpC (partial exit runner) ---
+        vscalpc_params = {
+            "sm_index": MNQ_SM_INDEX, "sm_flow": MNQ_SM_FLOW,
+            "sm_norm": MNQ_SM_NORM, "sm_ema": MNQ_SM_EMA,
+            "sm_threshold": VSCALPA_SM_THRESHOLD,
+            "rsi_len": VSCALPA_RSI_LEN, "rsi_buy": VSCALPA_RSI_BUY,
+            "rsi_sell": VSCALPA_RSI_SELL, "cooldown": VSCALPA_COOLDOWN,
+            "sl_pts": VSCALPC_SL_PTS, "tp1_pts": VSCALPC_TP1_PTS,
+            "tp2_pts": VSCALPC_TP2_PTS, "sl_to_be": VSCALPC_SL_TO_BE,
+            "be_time_bars": VSCALPC_BE_TIME,
+        }
+        run_partial_strategy(
+            "vScalpC", "MNQ_VSCALPC",
+            mnq_opens, mnq_highs, mnq_lows, mnq_closes, mnq_sm_arr, mnq_times,
+            rsi_mnq_curr, rsi_mnq_prev,
+            VSCALPA_RSI_BUY, VSCALPA_RSI_SELL, VSCALPA_SM_THRESHOLD,
+            VSCALPA_COOLDOWN, VSCALPC_SL_PTS, VSCALPC_TP1_PTS, VSCALPC_TP2_PTS,
+            MNQ_DOLLAR_PER_PT, MNQ_COMMISSION,
+            vscalpc_params, dr, split_name,
+            entry_end_et=VSCALPA_ENTRY_END_ET,
+            sl_to_be=VSCALPC_SL_TO_BE, be_time_bars=VSCALPC_BE_TIME,
         )
 
         # --- MES v2 ---

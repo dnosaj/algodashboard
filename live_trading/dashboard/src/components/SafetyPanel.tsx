@@ -198,7 +198,7 @@ export function SafetyPanel({ safety, positions, sendCommand }: SafetyPanelProps
               {s.strategy_id}
             </span>
 
-            {/* Status badge: PAUSED > VIX GATE > LELEDC > LEVEL > ACTIVE */}
+            {/* Status badge: PAUSED > VIX GATE > LELEDC > LEVEL > ATR > ADR DIR > ACTIVE */}
             {s.paused ? (
               <PausedBadge paused={true} />
             ) : s.vix_gated ? (
@@ -227,6 +227,26 @@ export function SafetyPanel({ safety, positions, sendCommand }: SafetyPanelProps
                 color: '#8888cc',
               }}>
                 LEVEL
+              </span>
+            ) : s.atr_gated ? (
+              <span style={{
+                fontSize: 10, fontWeight: 600, fontFamily: FONT,
+                padding: '2px 6px', borderRadius: 3,
+                backgroundColor: 'rgba(170,100,220,0.12)',
+                color: '#aa64dc',
+              }}>
+                ATR
+              </span>
+            ) : s.adr_dir_gated ? (
+              <span style={{
+                fontSize: 10, fontWeight: 600, fontFamily: FONT,
+                padding: '2px 6px', borderRadius: 3,
+                backgroundColor: 'rgba(0,170,255,0.12)',
+                color: '#00aaff',
+              }}>
+                ADR {s.adr_dir_ratio != null
+                  ? `${s.adr_dir_ratio >= 0 ? 'L' : 'S'} BLK ${Math.abs(s.adr_dir_ratio * 100).toFixed(0)}%`
+                  : ''}
               </span>
             ) : (
               <PausedBadge paused={false} />

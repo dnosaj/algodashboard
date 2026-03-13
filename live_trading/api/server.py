@@ -570,6 +570,8 @@ def create_app(handle: EngineHandle) -> FastAPI:
         legacy multi-day files (_to_ pattern) and today's date (live
         engine data is authoritative for today).
 
+        Only includes trades from currently active strategies.
+
         Returns dict mapping "YYYY-MM-DD" -> daily P&L sum.
         Cached with 5-minute TTL.
         """
@@ -581,6 +583,7 @@ def create_app(handle: EngineHandle) -> FastAPI:
 
         from zoneinfo import ZoneInfo
         today = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
+        active_strategies = {s.strategy_id for s in handle.config.strategies}
         daily: dict[str, float] = {}
 
         for f in SESSIONS_DIR.glob("session_*.json"):
@@ -595,7 +598,10 @@ def create_app(handle: EngineHandle) -> FastAPI:
                 continue
             try:
                 data = json.loads(f.read_text())
-                day_pnl = sum(t.get("pnl", 0) for t in data.get("trades", []))
+                day_pnl = sum(
+                    t.get("pnl", 0) for t in data.get("trades", [])
+                    if t.get("strategy_id", t.get("instrument", "")) in active_strategies
+                )
                 daily[file_date] = day_pnl
             except Exception as e:
                 logger.warning(f"Skipping malformed session file {f.name}: {e}")
@@ -614,9 +620,13 @@ def create_app(handle: EngineHandle) -> FastAPI:
 
         # Today's trades from live engine (authoritative)
         today = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
+        active_strategies = {s.strategy_id for s in handle.config.strategies}
         today_pnl = 0.0
         for t in handle.get_trades():
             if t.exit_time is None:
+                continue
+            sid = t.strategy_id or t.instrument
+            if sid not in active_strategies:
                 continue
             date = t.exit_time.strftime("%Y-%m-%d")
             if date == today:

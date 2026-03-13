@@ -73,7 +73,8 @@ def run_backtest_partial_exit(opens, highs, lows, closes, sm, times,
                               sl_to_be_after_tp1=False,
                               be_time_bars=0,
                               entry_end_et=VSCALPA_ENTRY_END_ET,
-                              eod_minutes_et=NY_CLOSE_ET):
+                              eod_minutes_et=NY_CLOSE_ET,
+                              entry_gate=None):
     """Backtest with 2-contract partial exit.
 
     Entry logic: identical to run_backtest_tp_exit (V15 params).
@@ -86,6 +87,10 @@ def run_backtest_partial_exit(opens, highs, lows, closes, sm, times,
       - EOD: bar_mins >= eod_minutes_et -> fill at bar close
       - SL/TP: prev bar close breaches level -> fill at next open
       - BE_TIME: (i-1) - entry_idx >= be_time_bars -> fill at next open (runner only)
+
+    New parameters:
+      entry_gate:  np bool array, True=entry allowed. Uses i-1 (prev bar).
+                   None = no gate (all entries allowed).
 
     Returns list of composite trade dicts with combined P&L for both legs.
     """
@@ -299,8 +304,9 @@ def run_backtest_partial_exit(opens, highs, lows, closes, sm, times,
             bars_since = i - exit_bar
             in_session = NY_OPEN_ET <= bar_mins_et <= entry_end_et
             cd_ok = bars_since >= cooldown_bars
+            gate_ok = entry_gate is None or entry_gate[i - 1]
 
-            if in_session and cd_ok:
+            if in_session and cd_ok and gate_ok:
                 if sm_bull and rsi_long_trigger and not long_used:
                     trade_state = 1
                     entry_price = opens[i]

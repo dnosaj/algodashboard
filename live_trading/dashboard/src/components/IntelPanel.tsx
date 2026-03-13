@@ -86,7 +86,7 @@ function renderMarkdown(md: string): JSX.Element[] {
 function renderInline(text: string): (string | JSX.Element)[] {
   // Handle **bold**, *italic*, `code`, and $values
   const parts: (string | JSX.Element)[] = [];
-  const regex = /(\*\*(.+?)\*\*|\*(.+?)\*|`(.+?)`|(\$-?[\d,.]+(?:\.\d+)?))/g;
+  const regex = /(\*\*(.+?)\*\*|\*(.+?)\*|`(.+?)`|(-?\$[\d,.]+(?:\.\d+)?))/g;
   let lastIndex = 0;
   let match: RegExpExecArray | null;
 

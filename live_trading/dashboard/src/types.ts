@@ -82,6 +82,9 @@ export interface SignalEvent {
   sm_value: number;
   rsi_value: number;
   ts: string;
+  blocked?: boolean;
+  block_reason?: string;
+  strategy_id?: string;
 }
 
 export interface WSMessage {
@@ -124,6 +127,9 @@ export interface SafetyStrategyStatus {
   vix_gated: boolean;
   leledc_gated: boolean;
   prior_day_gated: boolean;
+  atr_gated: boolean;
+  adr_dir_gated: boolean;
+  adr_dir_ratio: number | null;
 }
 
 export interface SafetyStatusData {
@@ -147,6 +153,8 @@ export interface SafetyStatusData {
     vah: number | null;
     val: number | null;
   }>;
+  prior_day_atr: Record<string, number | null>;
+  adr: Record<string, number | null>;
   strategies: Record<string, SafetyStrategyStatus>;
 }
 

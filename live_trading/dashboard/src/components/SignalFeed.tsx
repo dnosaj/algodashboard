@@ -15,7 +15,8 @@ function formatTime(ts: string): string {
   }
 }
 
-function getSignalColor(type: string): string {
+function getSignalColor(type: string, blocked?: boolean): string {
+  if (blocked) return '#ff8800';
   switch (type) {
     case 'BUY': return '#00ff88';
     case 'SELL': return '#ff4444';
@@ -23,6 +24,20 @@ function getSignalColor(type: string): string {
     case 'CLOSE_SHORT': return '#ffaa00';
     default: return '#888';
   }
+}
+
+// Shorten block reasons for display
+function shortBlockReason(reason: string): string {
+  if (reason.includes('prior-day level')) return 'VPOC/HL GATE';
+  if (reason.includes('Prior-day level')) return 'VPOC/HL GATE';
+  if (reason.includes('Near prior-day')) return 'VPOC/HL GATE';
+  if (reason.includes('Leledc')) return 'LELEDC GATE';
+  if (reason.includes('VIX')) return 'VIX GATE';
+  if (reason.includes('ADR') || reason.includes('adr')) return 'ADR GATE';
+  if (reason.includes('ATR') || reason.includes('atr')) return 'ATR GATE';
+  if (reason.includes('daily loss')) return 'DAILY LOSS';
+  if (reason.includes('cooldown')) return 'COOLDOWN';
+  return 'BLOCKED';
 }
 
 function getSignalLabel(type: string): string {
@@ -60,14 +75,14 @@ export function SignalFeed({ signals }: SignalFeedProps) {
           </div>
         ) : (
           signals.map((sig, i) => {
-            const color = getSignalColor(sig.type);
+            const color = getSignalColor(sig.type, sig.blocked);
             return (
               <div key={i} style={{
                 display: 'flex', alignItems: 'center', gap: 10,
                 padding: '5px 0',
                 borderBottom: i < signals.length - 1 ? '1px solid #1a1a2e' : 'none',
                 fontSize: 11, fontFamily: FONT,
-                opacity: i === 0 ? 1 : 0.7 + (0.3 * Math.max(0, 1 - i / 10)),
+                opacity: sig.blocked ? 0.6 : (i === 0 ? 1 : 0.7 + (0.3 * Math.max(0, 1 - i / 10))),
               }}>
                 <span style={{ color: '#555', minWidth: 60 }}>{formatTime(sig.ts)}</span>
                 <span style={{ color: '#8888cc', minWidth: 32, fontWeight: 600 }}>{sig.instrument}</span>
@@ -75,6 +90,7 @@ export function SignalFeed({ signals }: SignalFeedProps) {
                   color, fontWeight: 700, minWidth: 90,
                   padding: '1px 5px', borderRadius: 2,
                   backgroundColor: `${color}10`,
+                  textDecoration: sig.blocked ? 'line-through' : 'none',
                 }}>
                   {getSignalLabel(sig.type)}
                 </span>
@@ -84,8 +100,16 @@ export function SignalFeed({ signals }: SignalFeedProps) {
                 <span style={{ color: '#666' }}>
                   RSI={sig.rsi_value.toFixed(1)}
                 </span>
-                {sig.reason && (
-                  <span style={{ color: '#444', marginLeft: 'auto' }}>{sig.reason}</span>
+                {sig.blocked && sig.block_reason && (
+                  <span style={{
+                    color: '#ff8800', fontSize: 9, fontWeight: 700,
+                    padding: '1px 6px', borderRadius: 2,
+                    backgroundColor: '#ff880015',
+                    marginLeft: 'auto',
+                    letterSpacing: 0.5,
+                  }}>
+                    {shortBlockReason(sig.block_reason)}
+                  </span>
                 )}
               </div>
             );

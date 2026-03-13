@@ -22,6 +22,7 @@ from engine.config import (
     MES_V2,
     MNQ_V15,
     MNQ_VSCALPB,
+    MNQ_VSCALPC,
     SafetyConfig,
     StrategyConfig,
     TastytradeConfig,
@@ -30,7 +31,7 @@ from engine.config import (
 
 # Each instrument maps to a list of strategy configs (multi-strategy per instrument)
 INSTRUMENT_CONFIGS: dict[str, list[StrategyConfig]] = {
-    "MNQ": [MNQ_V15, MNQ_VSCALPB],
+    "MNQ": [MNQ_V15, MNQ_VSCALPB, MNQ_VSCALPC],
     "MES": [MES_V2],
 }
 

@@ -36,7 +36,7 @@ RESULTS_DIR = Path(__file__).resolve().parent
 
 def save_backtest(trades, strategy, params, data_range, split="FULL",
                   dollar_per_pt=2.0, commission=0.52, notes="",
-                  script_name=""):
+                  script_name="", qty=1):
     """Save a list of trade dicts to a CSV with metadata header.
 
     Args:
@@ -52,6 +52,8 @@ def save_backtest(trades, strategy, params, data_range, split="FULL",
         commission: per-side commission in dollars
         notes: free-form text
         script_name: name of the calling script
+        qty: number of contracts (for commission calculation; pts already
+             reflects total across all legs)
 
     Returns:
         Path to the saved CSV file.
@@ -69,7 +71,7 @@ def save_backtest(trades, strategy, params, data_range, split="FULL",
     cumulative_pnl = 0.0
     for i, t in enumerate(trades):
         pnl_pts = t["pts"]
-        pnl_dollar = pnl_pts * dollar_per_pt - 2 * commission
+        pnl_dollar = pnl_pts * dollar_per_pt - 2 * commission * qty
         cumulative_pnl += pnl_dollar
 
         entry_time = t["entry_time"]
@@ -125,6 +127,7 @@ def save_backtest(trades, strategy, params, data_range, split="FULL",
         "params": params,
         "dollar_per_pt": dollar_per_pt,
         "commission_per_side": commission,
+        "qty": qty,
         "total_trades": len(rows),
         "total_pnl": round(cumulative_pnl, 2),
         "run_timestamp": datetime.now(timezone.utc).isoformat(),
