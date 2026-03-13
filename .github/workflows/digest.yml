@@ -53,7 +53,7 @@ jobs:
             echo "mode=${{ inputs.mode }}" >> $GITHUB_OUTPUT
             echo "date_arg=${{ inputs.date && format('--date {0}', inputs.date) || '' }}" >> $GITHUB_OUTPUT
             echo "dry_run=${{ inputs.dry_run && '--dry-run' || '' }}" >> $GITHUB_OUTPUT
-          elif [ "${{ github.event.schedule }}" = "30 20 * * 1-5" ]; then
+          elif [ "${{ github.event.schedule }}" = "0 21 * * 1-5" ]; then
             echo "mode=eod" >> $GITHUB_OUTPUT
             echo "date_arg=" >> $GITHUB_OUTPUT
             echo "dry_run=" >> $GITHUB_OUTPUT
