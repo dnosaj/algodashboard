@@ -1,0 +1,607 @@
+/Users/jasongeorge/Desktop/NQ trading/backtesting_engine/strategies/v10_test_common.py:249: RuntimeWarning: invalid value encountered in divide
+  rs = np.where(al > 0, ag / al, 100.0)
+/Users/jasongeorge/Desktop/NQ trading/backtesting_engine/strategies/v10_test_common.py:249: RuntimeWarning: invalid value encountered in divide
+  rs = np.where(al > 0, ag / al, 100.0)
+/Users/jasongeorge/Desktop/NQ trading/backtesting_engine/strategies/v10_test_common.py:200: RuntimeWarning: invalid value encountered in divide
+  rs = np.where(al > 0, ag / al, 100.0)
+/Users/jasongeorge/Desktop/NQ trading/backtesting_engine/strategies/v10_test_common.py:200: RuntimeWarning: invalid value encountered in divide
+  rs = np.where(al > 0, ag / al, 100.0)
+/Users/jasongeorge/Desktop/NQ trading/backtesting_engine/strategies/v10_test_common.py:200: RuntimeWarning: invalid value encountered in divide
+  rs = np.where(al > 0, ag / al, 100.0)
+========================================================================================================================
+vScalpC ADR Exhaustion Sweep (partial exit engine)
+========================================================================================================================
+Loaded MNQ: 368251 bars from 2025-02-17 00:00:00 to 2026-03-05 23:59:00
+  IS:  184125 bars (2025-02-17 00:00:00 to 2025-08-25 22:05:00)
+  OOS: 184126 bars (2025-08-25 22:06:00 to 2026-03-05 23:59:00)
+
+Running baselines...
+  FULL baseline:  463 trades (  0 blocked, 0%), WR  77.3%, PF  1.452 (dPF  +0.0%), $ +6469.46 (d$     +0), Sharpe  2.253 (d+0.000), MaxDD $-1073.64
+    TP2 rate: 43.2% (baseline 43.2%)
+  IS   baseline:  233 trades (  0 blocked, 0%), WR  77.3%, PF  1.386 (dPF  +0.0%), $ +2960.36 (d$     +0), Sharpe  1.984 (d+0.000), MaxDD $-1056.82
+    TP2 rate: 43.3% (baseline 43.3%)
+  OOS  baseline:  230 trades (  0 blocked, 0%), WR  77.4%, PF  1.529 (dPF  +0.0%), $ +3509.10 (d$     +0), Sharpe  2.547 (d+0.000), MaxDD $-1073.64
+    TP2 rate: 43.0% (baseline 43.0%)
+
+Computing session tracking and ADR...
+
+========================================================================================================================
+LAYER 1: Basic ADR Range Gate — block when today_range / ADR >= threshold
+========================================================================================================================
+
+  rng_lb5_t0.7  [FAIL]
+    FULL:  350 trades (113 blocked, 24%), WR  77.7%, PF  1.526 (dPF  +5.1%), $ +5507.50 (d$   -962), Sharpe  2.547 (d+0.294), MaxDD $ -851.62
+      TP2 rate: 43.4% (baseline 43.2%)
+    IS  :  184 trades ( 49 blocked, 21%), WR  76.6%, PF  1.358 (dPF  -2.0%), $ +2213.28 (d$   -747), Sharpe  1.850 (d-0.134), MaxDD $ -851.62
+      TP2 rate: 42.4% (baseline 43.3%)
+    OOS :  166 trades ( 64 blocked, 28%), WR  78.9%, PF  1.769 (dPF +15.7%), $ +3294.22 (d$   -215), Sharpe  3.429 (d+0.882), MaxDD $ -829.96
+      TP2 rate: 44.6% (baseline 43.0%)
+
+  rng_lb5_t0.8  [FAIL]
+    FULL:  380 trades ( 83 blocked, 18%), WR  77.6%, PF  1.499 (dPF  +3.2%), $ +5693.60 (d$   -776), Sharpe  2.435 (d+0.182), MaxDD $ -809.04
+      TP2 rate: 43.2% (baseline 43.2%)
+    IS  :  195 trades ( 38 blocked, 16%), WR  76.9%, PF  1.371 (dPF  -1.1%), $ +2374.90 (d$   -585), Sharpe  1.898 (d-0.086), MaxDD $ -792.74
+      TP2 rate: 42.1% (baseline 43.3%)
+    OOS :  185 trades ( 45 blocked, 20%), WR  78.4%, PF  1.662 (dPF  +8.7%), $ +3318.70 (d$   -190), Sharpe  3.064 (d+0.517), MaxDD $ -809.04
+      TP2 rate: 44.3% (baseline 43.0%)
+
+  rng_lb5_t0.9  [FAIL]
+    FULL:  405 trades ( 58 blocked, 13%), WR  77.5%, PF  1.495 (dPF  +3.0%), $ +6140.60 (d$   -329), Sharpe  2.433 (d+0.180), MaxDD $ -792.74
+      TP2 rate: 44.0% (baseline 43.2%)
+    IS  :  205 trades ( 28 blocked, 12%), WR  76.6%, PF  1.364 (dPF  -1.6%), $ +2470.10 (d$   -490), Sharpe  1.872 (d-0.112), MaxDD $ -792.74
+      TP2 rate: 42.4% (baseline 43.3%)
+    OOS :  200 trades ( 30 blocked, 13%), WR  78.5%, PF  1.653 (dPF  +8.1%), $ +3670.50 (d$   +161), Sharpe  3.054 (d+0.507), MaxDD $ -759.10
+      TP2 rate: 45.5% (baseline 43.0%)
+
+  rng_lb5_t1.0  [FAIL]
+    FULL:  422 trades ( 41 blocked, 9%), WR  77.7%, PF  1.509 (dPF  +3.9%), $ +6517.74 (d$    +48), Sharpe  2.490 (d+0.237), MaxDD $ -845.18
+      TP2 rate: 44.1% (baseline 43.2%)
+    IS  :  217 trades ( 16 blocked, 7%), WR  77.0%, PF  1.369 (dPF  -1.2%), $ +2642.64 (d$   -318), Sharpe  1.897 (d-0.087), MaxDD $ -845.18
+      TP2 rate: 42.9% (baseline 43.3%)
+    OOS :  205 trades ( 25 blocked, 11%), WR  78.5%, PF  1.689 (dPF +10.5%), $ +3875.10 (d$   +366), Sharpe  3.174 (d+0.627), MaxDD $ -692.48
+      TP2 rate: 45.4% (baseline 43.0%)
+
+  rng_lb5_t1.1  [FAIL]
+    FULL:  428 trades ( 35 blocked, 8%), WR  77.8%, PF  1.513 (dPF  +4.2%), $ +6652.26 (d$   +183), Sharpe  2.509 (d+0.256), MaxDD $-1012.26
+      TP2 rate: 44.2% (baseline 43.2%)
+    IS  :  220 trades ( 13 blocked, 6%), WR  76.8%, PF  1.354 (dPF  -2.3%), $ +2598.90 (d$   -361), Sharpe  1.836 (d-0.148), MaxDD $-1012.26
+      TP2 rate: 42.7% (baseline 43.3%)
+    OOS :  208 trades ( 22 blocked, 10%), WR  78.8%, PF  1.720 (dPF +12.5%), $ +4053.36 (d$   +544), Sharpe  3.290 (d+0.743), MaxDD $ -692.48
+      TP2 rate: 45.7% (baseline 43.0%)
+
+  rng_lb5_t1.2  [FAIL]
+    FULL:  444 trades ( 19 blocked, 4%), WR  77.0%, PF  1.444 (dPF  -0.6%), $ +6199.48 (d$   -270), Sharpe  2.229 (d-0.024), MaxDD $-1073.64
+      TP2 rate: 43.7% (baseline 43.2%)
+    IS  :  226 trades (  7 blocked, 3%), WR  77.4%, PF  1.413 (dPF  +1.9%), $ +3029.42 (d$    +69), Sharpe  2.096 (d+0.112), MaxDD $ -821.50
+      TP2 rate: 43.4% (baseline 43.3%)
+    OOS :  218 trades ( 12 blocked, 5%), WR  76.6%, PF  1.478 (dPF  -3.3%), $ +3170.06 (d$   -339), Sharpe  2.373 (d-0.174), MaxDD $-1073.64
+      TP2 rate: 44.0% (baseline 43.0%)
+
+  rng_lb10_t0.7  [FAIL]
+    FULL:  356 trades (107 blocked, 23%), WR  77.0%, PF  1.404 (dPF  -3.3%), $ +4552.52 (d$  -1917), Sharpe  2.031 (d-0.222), MaxDD $ -851.62
+      TP2 rate: 42.1% (baseline 43.2%)
+    IS  :  192 trades ( 41 blocked, 18%), WR  76.0%, PF  1.253 (dPF  -9.6%), $ +1715.14 (d$  -1245), Sharpe  1.361 (d-0.623), MaxDD $ -851.62
+      TP2 rate: 41.7% (baseline 43.3%)
+    OOS :  164 trades ( 66 blocked, 29%), WR  78.0%, PF  1.631 (dPF  +6.7%), $ +2837.38 (d$   -672), Sharpe  2.905 (d+0.358), MaxDD $ -692.48
+      TP2 rate: 42.7% (baseline 43.0%)
+
+  rng_lb10_t0.8  [FAIL]
+    FULL:  389 trades ( 74 blocked, 16%), WR  77.9%, PF  1.531 (dPF  +5.4%), $ +6090.88 (d$   -379), Sharpe  2.551 (d+0.298), MaxDD $ -792.74
+      TP2 rate: 43.2% (baseline 43.2%)
+    IS  :  204 trades ( 29 blocked, 12%), WR  76.5%, PF  1.326 (dPF  -4.3%), $ +2211.18 (d$   -749), Sharpe  1.690 (d-0.294), MaxDD $ -792.74
+      TP2 rate: 41.7% (baseline 43.3%)
+    OOS :  185 trades ( 45 blocked, 20%), WR  79.5%, PF  1.828 (dPF +19.6%), $ +3879.70 (d$   +371), Sharpe  3.616 (d+1.069), MaxDD $ -692.48
+      TP2 rate: 44.9% (baseline 43.0%)
+
+  rng_lb10_t0.9  [MARGINAL PASS] <<<
+    FULL:  404 trades ( 59 blocked, 13%), WR  78.7%, PF  1.627 (dPF +12.1%), $ +7193.18 (d$   +724), Sharpe  2.931 (d+0.678), MaxDD $ -792.74
+      TP2 rate: 44.6% (baseline 43.2%)
+    IS  :  212 trades ( 21 blocked, 9%), WR  77.4%, PF  1.421 (dPF  +2.5%), $ +2855.54 (d$   -105), Sharpe  2.119 (d+0.135), MaxDD $ -792.74
+      TP2 rate: 43.4% (baseline 43.3%)
+    OOS :  192 trades ( 38 blocked, 17%), WR  80.2%, PF  1.926 (dPF +26.0%), $ +4337.64 (d$   +829), Sharpe  3.941 (d+1.394), MaxDD $ -692.48
+      TP2 rate: 45.8% (baseline 43.0%)
+
+  rng_lb10_t1.0  [MARGINAL PASS] <<<
+    FULL:  419 trades ( 44 blocked, 10%), WR  77.8%, PF  1.500 (dPF  +3.3%), $ +6406.48 (d$    -63), Sharpe  2.454 (d+0.201), MaxDD $-1073.64
+      TP2 rate: 44.4% (baseline 43.2%)
+    IS  :  214 trades ( 19 blocked, 8%), WR  77.1%, PF  1.393 (dPF  +0.5%), $ +2749.88 (d$   -210), Sharpe  2.004 (d+0.020), MaxDD $ -792.74
+      TP2 rate: 43.5% (baseline 43.3%)
+    OOS :  205 trades ( 25 blocked, 11%), WR  78.5%, PF  1.627 (dPF  +6.4%), $ +3656.60 (d$   +148), Sharpe  2.956 (d+0.409), MaxDD $-1073.64
+      TP2 rate: 45.4% (baseline 43.0%)
+
+  rng_lb10_t1.1  [MARGINAL PASS] <<<
+    FULL:  430 trades ( 33 blocked, 7%), WR  77.9%, PF  1.514 (dPF  +4.3%), $ +6680.60 (d$   +211), Sharpe  2.508 (d+0.255), MaxDD $-1073.64
+      TP2 rate: 44.2% (baseline 43.2%)
+    IS  :  220 trades ( 13 blocked, 6%), WR  77.3%, PF  1.405 (dPF  +1.4%), $ +2900.40 (d$    -60), Sharpe  2.060 (d+0.076), MaxDD $ -839.18
+      TP2 rate: 43.6% (baseline 43.3%)
+    OOS :  210 trades ( 20 blocked, 9%), WR  78.6%, PF  1.648 (dPF  +7.8%), $ +3780.20 (d$   +271), Sharpe  3.015 (d+0.468), MaxDD $-1073.64
+      TP2 rate: 44.8% (baseline 43.0%)
+
+  rng_lb10_t1.2  [MARGINAL PASS] <<<
+    FULL:  437 trades ( 26 blocked, 6%), WR  77.8%, PF  1.503 (dPF  +3.5%), $ +6629.04 (d$   +160), Sharpe  2.457 (d+0.204), MaxDD $-1073.64
+      TP2 rate: 43.7% (baseline 43.2%)
+    IS  :  224 trades (  9 blocked, 4%), WR  77.7%, PF  1.421 (dPF  +2.5%), $ +3020.08 (d$    +60), Sharpe  2.124 (d+0.140), MaxDD $ -839.18
+      TP2 rate: 43.3% (baseline 43.3%)
+    OOS :  213 trades ( 17 blocked, 7%), WR  77.9%, PF  1.600 (dPF  +4.6%), $ +3608.96 (d$   +100), Sharpe  2.831 (d+0.284), MaxDD $-1073.64
+      TP2 rate: 44.1% (baseline 43.0%)
+
+  rng_lb14_t0.7  [FAIL]
+    FULL:  356 trades (107 blocked, 23%), WR  76.7%, PF  1.431 (dPF  -1.4%), $ +4775.02 (d$  -1694), Sharpe  2.145 (d-0.108), MaxDD $ -857.32
+      TP2 rate: 42.4% (baseline 43.2%)
+    IS  :  191 trades ( 42 blocked, 18%), WR  75.4%, PF  1.288 (dPF  -7.1%), $ +1900.22 (d$  -1060), Sharpe  1.527 (d-0.457), MaxDD $ -857.32
+      TP2 rate: 41.9% (baseline 43.3%)
+    OOS :  165 trades ( 65 blocked, 28%), WR  78.2%, PF  1.640 (dPF  +7.3%), $ +2874.80 (d$   -634), Sharpe  2.942 (d+0.395), MaxDD $ -692.48
+      TP2 rate: 43.0% (baseline 43.0%)
+
+  rng_lb14_t0.8  [FAIL]
+    FULL:  387 trades ( 76 blocked, 16%), WR  78.0%, PF  1.536 (dPF  +5.8%), $ +6052.04 (d$   -417), Sharpe  2.561 (d+0.308), MaxDD $ -792.74
+      TP2 rate: 42.9% (baseline 43.2%)
+    IS  :  207 trades ( 26 blocked, 11%), WR  76.8%, PF  1.350 (dPF  -2.6%), $ +2372.94 (d$   -587), Sharpe  1.797 (d-0.187), MaxDD $ -792.74
+      TP2 rate: 42.0% (baseline 43.3%)
+    OOS :  180 trades ( 50 blocked, 22%), WR  79.4%, PF  1.816 (dPF +18.8%), $ +3679.10 (d$   +170), Sharpe  3.547 (d+1.000), MaxDD $ -692.48
+      TP2 rate: 43.9% (baseline 43.0%)
+
+  rng_lb14_t0.9  [FAIL]
+    FULL:  402 trades ( 61 blocked, 13%), WR  78.4%, PF  1.573 (dPF  +8.3%), $ +6694.34 (d$   +225), Sharpe  2.724 (d+0.471), MaxDD $ -792.74
+      TP2 rate: 44.0% (baseline 43.2%)
+    IS  :  211 trades ( 22 blocked, 9%), WR  76.8%, PF  1.340 (dPF  -3.3%), $ +2379.12 (d$   -581), Sharpe  1.758 (d-0.226), MaxDD $ -792.74
+      TP2 rate: 42.2% (baseline 43.3%)
+    OOS :  191 trades ( 39 blocked, 17%), WR  80.1%, PF  1.921 (dPF +25.6%), $ +4315.22 (d$   +806), Sharpe  3.936 (d+1.389), MaxDD $ -692.48
+      TP2 rate: 46.1% (baseline 43.0%)
+
+  rng_lb14_t1.0  [FAIL]
+    FULL:  425 trades ( 38 blocked, 8%), WR  77.9%, PF  1.486 (dPF  +2.3%), $ +6306.00 (d$   -163), Sharpe  2.391 (d+0.138), MaxDD $-1073.64
+      TP2 rate: 43.8% (baseline 43.2%)
+    IS  :  219 trades ( 14 blocked, 6%), WR  77.2%, PF  1.373 (dPF  -0.9%), $ +2672.98 (d$   -287), Sharpe  1.911 (d-0.073), MaxDD $ -869.10
+      TP2 rate: 42.9% (baseline 43.3%)
+    OOS :  206 trades ( 24 blocked, 10%), WR  78.6%, PF  1.625 (dPF  +6.3%), $ +3633.02 (d$   +124), Sharpe  2.938 (d+0.391), MaxDD $-1073.64
+      TP2 rate: 44.7% (baseline 43.0%)
+
+  rng_lb14_t1.1  [MARGINAL PASS] <<<
+    FULL:  432 trades ( 31 blocked, 7%), WR  78.0%, PF  1.493 (dPF  +2.8%), $ +6492.44 (d$    +23), Sharpe  2.423 (d+0.170), MaxDD $-1073.64
+      TP2 rate: 44.0% (baseline 43.2%)
+    IS  :  222 trades ( 11 blocked, 5%), WR  77.5%, PF  1.402 (dPF  +1.2%), $ +2878.74 (d$    -82), Sharpe  2.039 (d+0.055), MaxDD $ -839.18
+      TP2 rate: 43.2% (baseline 43.3%)
+    OOS :  210 trades ( 20 blocked, 9%), WR  78.6%, PF  1.602 (dPF  +4.8%), $ +3613.70 (d$   +105), Sharpe  2.855 (d+0.308), MaxDD $-1073.64
+      TP2 rate: 44.8% (baseline 43.0%)
+
+  rng_lb14_t1.2  [FAIL]
+    FULL:  442 trades ( 21 blocked, 5%), WR  77.4%, PF  1.442 (dPF  -0.7%), $ +6148.14 (d$   -321), Sharpe  2.221 (d-0.032), MaxDD $-1073.64
+      TP2 rate: 43.9% (baseline 43.2%)
+    IS  :  224 trades (  9 blocked, 4%), WR  77.2%, PF  1.386 (dPF  +0.0%), $ +2829.08 (d$   -131), Sharpe  1.976 (d-0.008), MaxDD $-1003.26
+      TP2 rate: 43.3% (baseline 43.3%)
+    OOS :  218 trades ( 12 blocked, 5%), WR  77.5%, PF  1.505 (dPF  -1.6%), $ +3319.06 (d$   -190), Sharpe  2.485 (d-0.062), MaxDD $-1073.64
+      TP2 rate: 44.5% (baseline 43.0%)
+
+  rng_lb20_t0.7  [FAIL]
+    FULL:  365 trades ( 98 blocked, 21%), WR  76.4%, PF  1.340 (dPF  -7.7%), $ +4028.30 (d$  -2441), Sharpe  1.753 (d-0.500), MaxDD $ -902.74
+      TP2 rate: 41.9% (baseline 43.2%)
+    IS  :  198 trades ( 35 blocked, 15%), WR  75.8%, PF  1.239 (dPF -10.6%), $ +1669.66 (d$  -1291), Sharpe  1.289 (d-0.695), MaxDD $ -902.74
+      TP2 rate: 41.4% (baseline 43.3%)
+    OOS :  167 trades ( 63 blocked, 27%), WR  77.2%, PF  1.485 (dPF  -2.9%), $ +2358.64 (d$  -1150), Sharpe  2.361 (d-0.186), MaxDD $ -809.04
+      TP2 rate: 42.5% (baseline 43.0%)
+
+  rng_lb20_t0.8  [FAIL]
+    FULL:  390 trades ( 73 blocked, 16%), WR  77.2%, PF  1.436 (dPF  -1.1%), $ +5255.80 (d$  -1214), Sharpe  2.168 (d-0.085), MaxDD $ -792.74
+      TP2 rate: 42.6% (baseline 43.2%)
+    IS  :  208 trades ( 25 blocked, 11%), WR  76.4%, PF  1.322 (dPF  -4.6%), $ +2253.36 (d$   -707), Sharpe  1.681 (d-0.303), MaxDD $ -792.74
+      TP2 rate: 42.3% (baseline 43.3%)
+    OOS :  182 trades ( 48 blocked, 21%), WR  78.0%, PF  1.594 (dPF  +4.3%), $ +3002.44 (d$   -507), Sharpe  2.780 (d+0.233), MaxDD $ -692.48
+      TP2 rate: 42.9% (baseline 43.0%)
+
+  rng_lb20_t0.9  [FAIL]
+    FULL:  410 trades ( 53 blocked, 11%), WR  77.6%, PF  1.453 (dPF  +0.1%), $ +5715.70 (d$   -754), Sharpe  2.246 (d-0.007), MaxDD $ -898.02
+      TP2 rate: 43.2% (baseline 43.2%)
+    IS  :  213 trades ( 20 blocked, 9%), WR  76.5%, PF  1.317 (dPF  -5.0%), $ +2270.46 (d$   -690), Sharpe  1.656 (d-0.328), MaxDD $ -898.02
+      TP2 rate: 42.3% (baseline 43.3%)
+    OOS :  197 trades ( 33 blocked, 14%), WR  78.7%, PF  1.633 (dPF  +6.8%), $ +3445.24 (d$    -64), Sharpe  2.945 (d+0.398), MaxDD $ -692.48
+      TP2 rate: 44.2% (baseline 43.0%)
+
+  rng_lb20_t1.0  [FAIL]
+    FULL:  420 trades ( 43 blocked, 9%), WR  78.1%, PF  1.508 (dPF  +3.9%), $ +6400.40 (d$    -69), Sharpe  2.470 (d+0.217), MaxDD $ -869.10
+      TP2 rate: 43.6% (baseline 43.2%)
+    IS  :  217 trades ( 16 blocked, 7%), WR  77.0%, PF  1.352 (dPF  -2.5%), $ +2520.64 (d$   -440), Sharpe  1.814 (d-0.170), MaxDD $ -869.10
+      TP2 rate: 42.4% (baseline 43.3%)
+    OOS :  203 trades ( 27 blocked, 12%), WR  79.3%, PF  1.713 (dPF +12.0%), $ +3879.76 (d$   +371), Sharpe  3.241 (d+0.694), MaxDD $ -692.48
+      TP2 rate: 44.8% (baseline 43.0%)
+
+  rng_lb20_t1.1  [FAIL]
+    FULL:  431 trades ( 32 blocked, 7%), WR  78.0%, PF  1.532 (dPF  +5.5%), $ +6833.02 (d$   +364), Sharpe  2.578 (d+0.325), MaxDD $-1003.26
+      TP2 rate: 44.1% (baseline 43.2%)
+    IS  :  221 trades ( 12 blocked, 5%), WR  76.9%, PF  1.349 (dPF  -2.7%), $ +2562.32 (d$   -398), Sharpe  1.810 (d-0.174), MaxDD $-1003.26
+      TP2 rate: 42.5% (baseline 43.3%)
+    OOS :  210 trades ( 20 blocked, 9%), WR  79.0%, PF  1.775 (dPF +16.1%), $ +4270.70 (d$   +762), Sharpe  3.474 (d+0.927), MaxDD $ -692.48
+      TP2 rate: 45.7% (baseline 43.0%)
+
+  rng_lb20_t1.2  [FAIL]
+    FULL:  443 trades ( 20 blocked, 4%), WR  77.2%, PF  1.432 (dPF  -1.4%), $ +6025.56 (d$   -444), Sharpe  2.174 (d-0.079), MaxDD $-1073.64
+      TP2 rate: 43.6% (baseline 43.2%)
+    IS  :  224 trades (  9 blocked, 4%), WR  77.2%, PF  1.386 (dPF  +0.0%), $ +2829.08 (d$   -131), Sharpe  1.976 (d-0.008), MaxDD $-1003.26
+      TP2 rate: 43.3% (baseline 43.3%)
+    OOS :  219 trades ( 11 blocked, 5%), WR  77.2%, PF  1.483 (dPF  -3.0%), $ +3196.48 (d$   -313), Sharpe  2.388 (d-0.159), MaxDD $-1073.64
+      TP2 rate: 43.8% (baseline 43.0%)
+
+========================================================================================================================
+LAYER 2: Directional ADR Gate — block longs when rally/ADR >= thr
+========================================================================================================================
+
+  dir_lb5_t0.3  [FAIL]
+    FULL:  341 trades (122 blocked, 26%), WR  76.8%, PF  1.510 (dPF  +4.0%), $ +5316.22 (d$  -1153), Sharpe  2.490 (d+0.237), MaxDD $ -747.40
+      TP2 rate: 44.6% (baseline 43.2%)
+    IS  :  170 trades ( 63 blocked, 27%), WR  75.9%, PF  1.360 (dPF  -1.9%), $ +2035.40 (d$   -925), Sharpe  1.845 (d-0.139), MaxDD $ -746.28
+      TP2 rate: 42.9% (baseline 43.3%)
+    OOS :  171 trades ( 59 blocked, 26%), WR  77.8%, PF  1.688 (dPF +10.4%), $ +3280.82 (d$   -228), Sharpe  3.189 (d+0.642), MaxDD $ -747.40
+      TP2 rate: 46.2% (baseline 43.0%)
+
+  dir_lb5_t0.4  [FAIL]
+    FULL:  379 trades ( 84 blocked, 18%), WR  76.8%, PF  1.496 (dPF  +3.0%), $ +5794.18 (d$   -675), Sharpe  2.447 (d+0.194), MaxDD $-1004.64
+      TP2 rate: 44.6% (baseline 43.2%)
+    IS  :  193 trades ( 40 blocked, 17%), WR  75.1%, PF  1.292 (dPF  -6.8%), $ +1970.56 (d$   -990), Sharpe  1.560 (d-0.424), MaxDD $-1004.64
+      TP2 rate: 43.0% (baseline 43.3%)
+    OOS :  186 trades ( 44 blocked, 19%), WR  78.5%, PF  1.775 (dPF +16.1%), $ +3823.62 (d$   +315), Sharpe  3.480 (d+0.933), MaxDD $ -747.40
+      TP2 rate: 46.2% (baseline 43.0%)
+
+  dir_lb5_t0.5  [MARGINAL PASS] <<<
+    FULL:  405 trades ( 58 blocked, 13%), WR  78.5%, PF  1.604 (dPF +10.5%), $ +7142.10 (d$   +673), Sharpe  2.875 (d+0.622), MaxDD $ -925.10
+      TP2 rate: 45.4% (baseline 43.2%)
+    IS  :  209 trades ( 24 blocked, 10%), WR  77.5%, PF  1.433 (dPF  +3.4%), $ +2916.78 (d$    -44), Sharpe  2.187 (d+0.203), MaxDD $ -925.10
+      TP2 rate: 44.5% (baseline 43.3%)
+    OOS :  196 trades ( 34 blocked, 15%), WR  79.6%, PF  1.829 (dPF +19.6%), $ +4225.32 (d$   +716), Sharpe  3.685 (d+1.138), MaxDD $ -692.48
+      TP2 rate: 46.4% (baseline 43.0%)
+
+  dir_lb5_t0.6  [MARGINAL PASS] <<<
+    FULL:  425 trades ( 38 blocked, 8%), WR  78.4%, PF  1.610 (dPF +10.9%), $ +7462.00 (d$   +993), Sharpe  2.885 (d+0.632), MaxDD $ -986.34
+      TP2 rate: 44.9% (baseline 43.2%)
+    IS  :  217 trades ( 16 blocked, 7%), WR  77.0%, PF  1.408 (dPF  +1.6%), $ +2898.64 (d$    -62), Sharpe  2.084 (d+0.100), MaxDD $ -986.34
+      TP2 rate: 44.2% (baseline 43.3%)
+    OOS :  208 trades ( 22 blocked, 10%), WR  79.8%, PF  1.892 (dPF +23.7%), $ +4563.36 (d$  +1054), Sharpe  3.840 (d+1.293), MaxDD $ -692.48
+      TP2 rate: 45.7% (baseline 43.0%)
+
+  dir_lb5_t0.7  [MARGINAL PASS] <<<
+    FULL:  440 trades ( 23 blocked, 5%), WR  78.0%, PF  1.559 (dPF  +7.4%), $ +7251.80 (d$   +782), Sharpe  2.692 (d+0.439), MaxDD $ -927.58
+      TP2 rate: 44.5% (baseline 43.2%)
+    IS  :  223 trades ( 10 blocked, 4%), WR  77.1%, PF  1.406 (dPF  +1.4%), $ +2963.66 (d$     +3), Sharpe  2.079 (d+0.095), MaxDD $ -927.58
+      TP2 rate: 43.9% (baseline 43.3%)
+    OOS :  217 trades ( 13 blocked, 6%), WR  78.8%, PF  1.756 (dPF +14.8%), $ +4288.14 (d$   +779), Sharpe  3.394 (d+0.847), MaxDD $ -595.06
+      TP2 rate: 45.2% (baseline 43.0%)
+
+  dir_lb5_t0.8  [FAIL]
+    FULL:  450 trades ( 13 blocked, 3%), WR  78.0%, PF  1.520 (dPF  +4.7%), $ +6970.00 (d$   +501), Sharpe  2.526 (d+0.273), MaxDD $-1103.82
+      TP2 rate: 43.8% (baseline 43.2%)
+    IS  :  228 trades (  5 blocked, 2%), WR  76.8%, PF  1.343 (dPF  -3.1%), $ +2643.76 (d$   -317), Sharpe  1.796 (d-0.188), MaxDD $-1103.82
+      TP2 rate: 43.4% (baseline 43.3%)
+    OOS :  222 trades (  8 blocked, 3%), WR  79.3%, PF  1.760 (dPF +15.1%), $ +4326.24 (d$   +817), Sharpe  3.378 (d+0.831), MaxDD $ -595.06
+      TP2 rate: 44.1% (baseline 43.0%)
+
+  dir_lb10_t0.3  [MARGINAL PASS] <<<
+    FULL:  342 trades (121 blocked, 26%), WR  77.5%, PF  1.552 (dPF  +6.9%), $ +5647.14 (d$   -822), Sharpe  2.661 (d+0.408), MaxDD $ -747.40
+      TP2 rate: 45.0% (baseline 43.2%)
+    IS  :  176 trades ( 57 blocked, 24%), WR  77.3%, PF  1.410 (dPF  +1.7%), $ +2325.42 (d$   -635), Sharpe  2.062 (d+0.078), MaxDD $ -746.28
+      TP2 rate: 43.2% (baseline 43.3%)
+    OOS :  166 trades ( 64 blocked, 28%), WR  77.7%, PF  1.730 (dPF +13.1%), $ +3321.72 (d$   -187), Sharpe  3.349 (d+0.802), MaxDD $ -747.40
+      TP2 rate: 47.0% (baseline 43.0%)
+
+  dir_lb10_t0.4  [MARGINAL PASS] <<<
+    FULL:  378 trades ( 85 blocked, 18%), WR  77.5%, PF  1.555 (dPF  +7.1%), $ +6275.76 (d$   -194), Sharpe  2.681 (d+0.428), MaxDD $ -905.92
+      TP2 rate: 45.2% (baseline 43.2%)
+    IS  :  192 trades ( 41 blocked, 18%), WR  76.6%, PF  1.397 (dPF  +0.8%), $ +2529.64 (d$   -431), Sharpe  2.037 (d+0.053), MaxDD $ -905.92
+      TP2 rate: 44.3% (baseline 43.3%)
+    OOS :  186 trades ( 44 blocked, 19%), WR  78.5%, PF  1.759 (dPF +15.0%), $ +3746.12 (d$   +237), Sharpe  3.421 (d+0.874), MaxDD $ -672.98
+      TP2 rate: 46.2% (baseline 43.0%)
+
+  dir_lb10_t0.5  [FAIL]
+    FULL:  408 trades ( 55 blocked, 12%), WR  77.9%, PF  1.557 (dPF  +7.2%), $ +6820.36 (d$   +351), Sharpe  2.697 (d+0.444), MaxDD $ -925.10
+      TP2 rate: 45.3% (baseline 43.2%)
+    IS  :  208 trades ( 25 blocked, 11%), WR  76.4%, PF  1.377 (dPF  -0.6%), $ +2616.36 (d$   -344), Sharpe  1.948 (d-0.036), MaxDD $ -925.10
+      TP2 rate: 44.2% (baseline 43.3%)
+    OOS :  200 trades ( 30 blocked, 13%), WR  79.5%, PF  1.792 (dPF +17.2%), $ +4204.00 (d$   +695), Sharpe  3.559 (d+1.012), MaxDD $ -692.48
+      TP2 rate: 46.5% (baseline 43.0%)
+
+  dir_lb10_t0.6  [FAIL]
+    FULL:  426 trades ( 37 blocked, 8%), WR  78.4%, PF  1.589 (dPF  +9.4%), $ +7328.42 (d$   +859), Sharpe  2.809 (d+0.556), MaxDD $ -904.18
+      TP2 rate: 45.1% (baseline 43.2%)
+    IS  :  215 trades ( 18 blocked, 8%), WR  76.7%, PF  1.385 (dPF  -0.1%), $ +2743.80 (d$   -217), Sharpe  1.984 (d+0.000), MaxDD $ -904.18
+      TP2 rate: 44.2% (baseline 43.3%)
+    OOS :  211 trades ( 19 blocked, 8%), WR  80.1%, PF  1.862 (dPF +21.8%), $ +4584.62 (d$  +1076), Sharpe  3.759 (d+1.212), MaxDD $ -595.06
+      TP2 rate: 46.0% (baseline 43.0%)
+
+  dir_lb10_t0.7  [FAIL]
+    FULL:  440 trades ( 23 blocked, 5%), WR  78.0%, PF  1.540 (dPF  +6.1%), $ +7037.80 (d$   +568), Sharpe  2.610 (d+0.357), MaxDD $ -946.08
+      TP2 rate: 44.3% (baseline 43.2%)
+    IS  :  224 trades (  9 blocked, 4%), WR  76.8%, PF  1.355 (dPF  -2.2%), $ +2667.08 (d$   -293), Sharpe  1.849 (d-0.135), MaxDD $ -946.08
+      TP2 rate: 43.8% (baseline 43.3%)
+    OOS :  216 trades ( 14 blocked, 6%), WR  79.2%, PF  1.792 (dPF +17.2%), $ +4370.72 (d$   +862), Sharpe  3.504 (d+0.957), MaxDD $ -874.56
+      TP2 rate: 44.9% (baseline 43.0%)
+
+  dir_lb10_t0.8  [FAIL]
+    FULL:  446 trades ( 17 blocked, 4%), WR  77.8%, PF  1.515 (dPF  +4.3%), $ +6892.32 (d$   +423), Sharpe  2.513 (d+0.260), MaxDD $-1096.24
+      TP2 rate: 44.2% (baseline 43.2%)
+    IS  :  228 trades (  5 blocked, 2%), WR  76.8%, PF  1.351 (dPF  -2.5%), $ +2698.26 (d$   -262), Sharpe  1.835 (d-0.149), MaxDD $-1096.24
+      TP2 rate: 43.9% (baseline 43.3%)
+    OOS :  218 trades ( 12 blocked, 5%), WR  78.9%, PF  1.736 (dPF +13.5%), $ +4194.06 (d$   +685), Sharpe  3.311 (d+0.764), MaxDD $ -874.56
+      TP2 rate: 44.5% (baseline 43.0%)
+
+  dir_lb14_t0.3  [STRONG PASS] <<<
+    FULL:  347 trades (116 blocked, 25%), WR  77.8%, PF  1.608 (dPF +10.7%), $ +6182.24 (d$   -287), Sharpe  2.892 (d+0.639), MaxDD $ -808.60
+      TP2 rate: 46.1% (baseline 43.2%)
+    IS  :  178 trades ( 55 blocked, 24%), WR  77.5%, PF  1.478 (dPF  +6.6%), $ +2682.26 (d$   -278), Sharpe  2.369 (d+0.385), MaxDD $ -808.60
+      TP2 rate: 44.9% (baseline 43.3%)
+    OOS :  169 trades ( 61 blocked, 27%), WR  78.1%, PF  1.769 (dPF +15.7%), $ +3499.98 (d$     -9), Sharpe  3.490 (d+0.943), MaxDD $ -747.40
+      TP2 rate: 47.3% (baseline 43.0%)
+
+  dir_lb14_t0.4  [MARGINAL PASS] <<<
+    FULL:  386 trades ( 77 blocked, 17%), WR  77.7%, PF  1.556 (dPF  +7.2%), $ +6445.12 (d$    -24), Sharpe  2.695 (d+0.442), MaxDD $ -838.50
+      TP2 rate: 45.6% (baseline 43.2%)
+    IS  :  198 trades ( 35 blocked, 15%), WR  76.8%, PF  1.386 (dPF  +0.0%), $ +2527.66 (d$   -433), Sharpe  1.982 (d-0.002), MaxDD $ -838.50
+      TP2 rate: 43.9% (baseline 43.3%)
+    OOS :  188 trades ( 42 blocked, 18%), WR  78.7%, PF  1.776 (dPF +16.2%), $ +3917.46 (d$   +408), Sharpe  3.521 (d+0.974), MaxDD $ -672.98
+      TP2 rate: 47.3% (baseline 43.0%)
+
+  dir_lb14_t0.5  [MARGINAL PASS] <<<
+    FULL:  408 trades ( 55 blocked, 12%), WR  77.7%, PF  1.555 (dPF  +7.1%), $ +6806.86 (d$   +337), Sharpe  2.684 (d+0.431), MaxDD $ -930.80
+      TP2 rate: 45.3% (baseline 43.2%)
+    IS  :  209 trades ( 24 blocked, 10%), WR  76.6%, PF  1.401 (dPF  +1.1%), $ +2785.78 (d$   -175), Sharpe  2.053 (d+0.069), MaxDD $ -930.80
+      TP2 rate: 44.5% (baseline 43.3%)
+    OOS :  199 trades ( 31 blocked, 13%), WR  78.9%, PF  1.756 (dPF +14.8%), $ +4021.08 (d$   +512), Sharpe  3.423 (d+0.876), MaxDD $ -692.48
+      TP2 rate: 46.2% (baseline 43.0%)
+
+  dir_lb14_t0.6  [MARGINAL PASS] <<<
+    FULL:  430 trades ( 33 blocked, 7%), WR  78.6%, PF  1.605 (dPF +10.5%), $ +7521.60 (d$  +1052), Sharpe  2.867 (d+0.614), MaxDD $ -868.76
+      TP2 rate: 45.1% (baseline 43.2%)
+    IS  :  218 trades ( 15 blocked, 6%), WR  77.1%, PF  1.403 (dPF  +1.2%), $ +2872.56 (d$    -88), Sharpe  2.060 (d+0.076), MaxDD $ -868.76
+      TP2 rate: 44.0% (baseline 43.3%)
+    OOS :  212 trades ( 18 blocked, 8%), WR  80.2%, PF  1.874 (dPF +22.6%), $ +4649.04 (d$  +1140), Sharpe  3.801 (d+1.254), MaxDD $ -595.06
+      TP2 rate: 46.2% (baseline 43.0%)
+
+  dir_lb14_t0.7  [FAIL]
+    FULL:  443 trades ( 20 blocked, 4%), WR  78.6%, PF  1.560 (dPF  +7.4%), $ +7290.06 (d$   +821), Sharpe  2.689 (d+0.436), MaxDD $-1111.74
+      TP2 rate: 44.5% (baseline 43.2%)
+    IS  :  228 trades (  5 blocked, 2%), WR  76.8%, PF  1.336 (dPF  -3.6%), $ +2592.26 (d$   -368), Sharpe  1.762 (d-0.222), MaxDD $-1111.74
+      TP2 rate: 43.4% (baseline 43.3%)
+    OOS :  215 trades ( 15 blocked, 7%), WR  80.5%, PF  1.883 (dPF +23.2%), $ +4697.80 (d$  +1189), Sharpe  3.815 (d+1.268), MaxDD $ -595.06
+      TP2 rate: 45.6% (baseline 43.0%)
+
+  dir_lb14_t0.8  [FAIL]
+    FULL:  449 trades ( 14 blocked, 3%), WR  78.0%, PF  1.505 (dPF  +3.7%), $ +6834.58 (d$   +365), Sharpe  2.472 (d+0.219), MaxDD $-1092.74
+      TP2 rate: 44.1% (baseline 43.2%)
+    IS  :  228 trades (  5 blocked, 2%), WR  76.8%, PF  1.340 (dPF  -3.3%), $ +2611.26 (d$   -349), Sharpe  1.780 (d-0.204), MaxDD $-1092.74
+      TP2 rate: 43.4% (baseline 43.3%)
+    OOS :  221 trades (  9 blocked, 4%), WR  79.2%, PF  1.721 (dPF +12.6%), $ +4223.32 (d$   +714), Sharpe  3.268 (d+0.721), MaxDD $ -874.56
+      TP2 rate: 44.8% (baseline 43.0%)
+
+  dir_lb20_t0.3  [STRONG PASS] <<<
+    FULL:  353 trades (110 blocked, 24%), WR  77.6%, PF  1.557 (dPF  +7.2%), $ +5803.26 (d$   -666), Sharpe  2.676 (d+0.423), MaxDD $ -803.68
+      TP2 rate: 45.0% (baseline 43.2%)
+    IS  :  186 trades ( 47 blocked, 20%), WR  78.0%, PF  1.504 (dPF  +8.5%), $ +2856.12 (d$   -104), Sharpe  2.449 (d+0.465), MaxDD $ -803.68
+      TP2 rate: 44.1% (baseline 43.3%)
+    OOS :  167 trades ( 63 blocked, 27%), WR  77.2%, PF  1.619 (dPF  +5.9%), $ +2947.14 (d$   -562), Sharpe  2.942 (d+0.395), MaxDD $ -747.40
+      TP2 rate: 46.1% (baseline 43.0%)
+
+  dir_lb20_t0.4  [FAIL]
+    FULL:  392 trades ( 71 blocked, 15%), WR  77.6%, PF  1.534 (dPF  +5.6%), $ +6325.14 (d$   -144), Sharpe  2.599 (d+0.346), MaxDD $ -843.50
+      TP2 rate: 45.4% (baseline 43.2%)
+    IS  :  205 trades ( 28 blocked, 12%), WR  76.1%, PF  1.312 (dPF  -5.3%), $ +2176.60 (d$   -784), Sharpe  1.640 (d-0.344), MaxDD $ -843.50
+      TP2 rate: 42.9% (baseline 43.3%)
+    OOS :  187 trades ( 43 blocked, 19%), WR  79.1%, PF  1.849 (dPF +20.9%), $ +4148.54 (d$   +639), Sharpe  3.773 (d+1.226), MaxDD $ -747.40
+      TP2 rate: 48.1% (baseline 43.0%)
+
+  dir_lb20_t0.5  [FAIL]
+    FULL:  414 trades ( 49 blocked, 11%), WR  77.8%, PF  1.537 (dPF  +5.9%), $ +6693.38 (d$   +224), Sharpe  2.602 (d+0.349), MaxDD $ -930.80
+      TP2 rate: 44.7% (baseline 43.2%)
+    IS  :  214 trades ( 19 blocked, 8%), WR  76.6%, PF  1.373 (dPF  -0.9%), $ +2666.38 (d$   -294), Sharpe  1.919 (d-0.065), MaxDD $ -930.80
+      TP2 rate: 43.5% (baseline 43.3%)
+    OOS :  200 trades ( 30 blocked, 13%), WR  79.0%, PF  1.757 (dPF +14.9%), $ +4027.00 (d$   +518), Sharpe  3.419 (d+0.872), MaxDD $ -727.48
+      TP2 rate: 46.0% (baseline 43.0%)
+
+  dir_lb20_t0.6  [FAIL]
+    FULL:  433 trades ( 30 blocked, 6%), WR  78.1%, PF  1.549 (dPF  +6.7%), $ +7051.36 (d$   +582), Sharpe  2.650 (d+0.397), MaxDD $ -881.26
+      TP2 rate: 44.6% (baseline 43.2%)
+    IS  :  220 trades ( 13 blocked, 6%), WR  76.4%, PF  1.350 (dPF  -2.6%), $ +2572.40 (d$   -388), Sharpe  1.818 (d-0.166), MaxDD $ -881.26
+      TP2 rate: 43.2% (baseline 43.3%)
+    OOS :  213 trades ( 17 blocked, 7%), WR  79.8%, PF  1.815 (dPF +18.7%), $ +4478.96 (d$   +970), Sharpe  3.614 (d+1.067), MaxDD $ -692.48
+      TP2 rate: 46.0% (baseline 43.0%)
+
+  dir_lb20_t0.7  [FAIL]
+    FULL:  446 trades ( 17 blocked, 4%), WR  78.0%, PF  1.521 (dPF  +4.8%), $ +6970.32 (d$   +501), Sharpe  2.540 (d+0.287), MaxDD $-1092.74
+      TP2 rate: 44.2% (baseline 43.2%)
+    IS  :  227 trades (  6 blocked, 3%), WR  76.7%, PF  1.330 (dPF  -4.0%), $ +2533.84 (d$   -427), Sharpe  1.731 (d-0.253), MaxDD $-1092.74
+      TP2 rate: 43.2% (baseline 43.3%)
+    OOS :  219 trades ( 11 blocked, 5%), WR  79.5%, PF  1.780 (dPF +16.4%), $ +4436.48 (d$   +927), Sharpe  3.484 (d+0.937), MaxDD $ -595.06
+      TP2 rate: 45.2% (baseline 43.0%)
+
+  dir_lb20_t0.8  [FAIL]
+    FULL:  451 trades ( 12 blocked, 3%), WR  78.0%, PF  1.508 (dPF  +3.9%), $ +6871.92 (d$   +402), Sharpe  2.481 (d+0.228), MaxDD $-1080.74
+      TP2 rate: 43.9% (baseline 43.2%)
+    IS  :  229 trades (  4 blocked, 2%), WR  76.9%, PF  1.344 (dPF  -3.0%), $ +2637.18 (d$   -323), Sharpe  1.795 (d-0.189), MaxDD $-1080.74
+      TP2 rate: 43.2% (baseline 43.3%)
+    OOS :  222 trades (  8 blocked, 3%), WR  79.3%, PF  1.723 (dPF +12.7%), $ +4234.74 (d$   +726), Sharpe  3.270 (d+0.723), MaxDD $ -874.56
+      TP2 rate: 44.6% (baseline 43.0%)
+
+========================================================================================================================
+LAYER 3: Combined Range + Directional Gate
+========================================================================================================================
+
+  comb_lb10_r0.9_d0.6  [MARGINAL PASS] <<<
+    FULL:  431 trades ( 32 blocked, 7%), WR  78.7%, PF  1.604 (dPF +10.5%), $ +7519.02 (d$  +1050), Sharpe  2.862 (d+0.609), MaxDD $ -875.84
+      TP2 rate: 45.0% (baseline 43.2%)
+    IS  :  220 trades ( 13 blocked, 6%), WR  77.3%, PF  1.414 (dPF  +2.0%), $ +2948.40 (d$    -12), Sharpe  2.102 (d+0.118), MaxDD $ -875.84
+      TP2 rate: 44.1% (baseline 43.3%)
+    OOS :  211 trades ( 19 blocked, 8%), WR  80.1%, PF  1.859 (dPF +21.6%), $ +4570.62 (d$  +1062), Sharpe  3.748 (d+1.201), MaxDD $ -595.06
+      TP2 rate: 46.0% (baseline 43.0%)
+
+  comb_lb10_r0.8_d0.5  [FAIL]
+    FULL:  421 trades ( 42 blocked, 9%), WR  78.1%, PF  1.554 (dPF  +7.0%), $ +6886.32 (d$   +417), Sharpe  2.664 (d+0.411), MaxDD $ -875.84
+      TP2 rate: 44.4% (baseline 43.2%)
+    IS  :  217 trades ( 16 blocked, 7%), WR  77.0%, PF  1.371 (dPF  -1.1%), $ +2640.14 (d$   -320), Sharpe  1.904 (d-0.080), MaxDD $ -875.84
+      TP2 rate: 42.9% (baseline 43.3%)
+    OOS :  204 trades ( 26 blocked, 11%), WR  79.4%, PF  1.798 (dPF +17.6%), $ +4246.18 (d$   +737), Sharpe  3.556 (d+1.009), MaxDD $ -692.48
+      TP2 rate: 46.1% (baseline 43.0%)
+
+  comb_lb10_r0.8_d0.7  [FAIL]
+    FULL:  440 trades ( 23 blocked, 5%), WR  78.0%, PF  1.540 (dPF  +6.1%), $ +7037.80 (d$   +568), Sharpe  2.610 (d+0.357), MaxDD $ -946.08
+      TP2 rate: 44.3% (baseline 43.2%)
+    IS  :  224 trades (  9 blocked, 4%), WR  76.8%, PF  1.355 (dPF  -2.2%), $ +2667.08 (d$   -293), Sharpe  1.849 (d-0.135), MaxDD $ -946.08
+      TP2 rate: 43.8% (baseline 43.3%)
+    OOS :  216 trades ( 14 blocked, 6%), WR  79.2%, PF  1.792 (dPF +17.2%), $ +4370.72 (d$   +862), Sharpe  3.504 (d+0.957), MaxDD $ -874.56
+      TP2 rate: 44.9% (baseline 43.0%)
+
+  comb_lb10_r1.0_d0.5  [FAIL]
+    FULL:  431 trades ( 32 blocked, 7%), WR  77.5%, PF  1.468 (dPF  +1.1%), $ +6266.02 (d$   -203), Sharpe  2.329 (d+0.076), MaxDD $-1073.64
+      TP2 rate: 44.3% (baseline 43.2%)
+    IS  :  220 trades ( 13 blocked, 6%), WR  76.8%, PF  1.363 (dPF  -1.7%), $ +2662.40 (d$   -298), Sharpe  1.879 (d-0.105), MaxDD $ -875.84
+      TP2 rate: 43.6% (baseline 43.3%)
+    OOS :  211 trades ( 19 blocked, 8%), WR  78.2%, PF  1.595 (dPF  +4.3%), $ +3603.62 (d$    +95), Sharpe  2.835 (d+0.288), MaxDD $-1073.64
+      TP2 rate: 45.0% (baseline 43.0%)
+
+  comb_lb10_r1.0_d0.7  [FAIL]
+    FULL:  442 trades ( 21 blocked, 5%), WR  77.4%, PF  1.476 (dPF  +1.7%), $ +6464.14 (d$     -5), Sharpe  2.358 (d+0.105), MaxDD $-1073.64
+      TP2 rate: 44.1% (baseline 43.2%)
+    IS  :  224 trades (  9 blocked, 4%), WR  76.8%, PF  1.355 (dPF  -2.2%), $ +2667.08 (d$   -293), Sharpe  1.849 (d-0.135), MaxDD $ -946.08
+      TP2 rate: 43.8% (baseline 43.3%)
+    OOS :  218 trades ( 12 blocked, 5%), WR  78.0%, PF  1.625 (dPF  +6.3%), $ +3797.06 (d$   +288), Sharpe  2.930 (d+0.383), MaxDD $-1073.64
+      TP2 rate: 44.5% (baseline 43.0%)
+
+========================================================================================================================
+LAYER 4: Remaining Range Gate — block when ADR - today_range < TP
+========================================================================================================================
+
+  --- Threshold: TP1=7 ---
+
+  remain_TP1=7_lb5  [MARGINAL PASS] <<<
+    FULL:  418 trades ( 45 blocked, 10%), WR  77.8%, PF  1.526 (dPF  +5.1%), $ +6638.56 (d$   +169), Sharpe  2.560 (d+0.307), MaxDD $ -792.74
+      TP2 rate: 44.5% (baseline 43.2%)
+    IS  :  215 trades ( 18 blocked, 8%), WR  77.2%, PF  1.399 (dPF  +0.9%), $ +2788.80 (d$   -172), Sharpe  2.027 (d+0.043), MaxDD $ -792.74
+      TP2 rate: 43.3% (baseline 43.3%)
+    OOS :  203 trades ( 27 blocked, 12%), WR  78.3%, PF  1.684 (dPF +10.1%), $ +3849.76 (d$   +341), Sharpe  3.169 (d+0.622), MaxDD $ -692.48
+      TP2 rate: 45.8% (baseline 43.0%)
+
+  remain_TP1=7_lb10  [MARGINAL PASS] <<<
+    FULL:  417 trades ( 46 blocked, 10%), WR  78.2%, PF  1.547 (dPF  +6.5%), $ +6795.64 (d$   +326), Sharpe  2.638 (d+0.385), MaxDD $-1073.64
+      TP2 rate: 44.6% (baseline 43.2%)
+    IS  :  214 trades ( 19 blocked, 8%), WR  77.1%, PF  1.393 (dPF  +0.5%), $ +2749.88 (d$   -210), Sharpe  2.004 (d+0.020), MaxDD $ -792.74
+      TP2 rate: 43.5% (baseline 43.3%)
+    OOS :  203 trades ( 27 blocked, 12%), WR  79.3%, PF  1.744 (dPF +14.1%), $ +4045.76 (d$   +537), Sharpe  3.370 (d+0.823), MaxDD $-1073.64
+      TP2 rate: 45.8% (baseline 43.0%)
+
+  remain_TP1=7_lb14  [FAIL]
+    FULL:  415 trades ( 48 blocked, 10%), WR  78.6%, PF  1.580 (dPF  +8.8%), $ +6972.30 (d$   +503), Sharpe  2.752 (d+0.499), MaxDD $ -898.02
+      TP2 rate: 44.1% (baseline 43.2%)
+    IS  :  215 trades ( 18 blocked, 8%), WR  76.7%, PF  1.346 (dPF  -2.9%), $ +2477.80 (d$   -483), Sharpe  1.791 (d-0.193), MaxDD $ -898.02
+      TP2 rate: 42.8% (baseline 43.3%)
+    OOS :  200 trades ( 30 blocked, 13%), WR  80.5%, PF  1.925 (dPF +25.9%), $ +4494.50 (d$   +985), Sharpe  3.934 (d+1.387), MaxDD $ -692.48
+      TP2 rate: 45.5% (baseline 43.0%)
+
+  remain_TP1=7_lb20  [FAIL]
+    FULL:  417 trades ( 46 blocked, 10%), WR  77.9%, PF  1.485 (dPF  +2.3%), $ +6112.14 (d$   -357), Sharpe  2.373 (d+0.120), MaxDD $ -869.10
+      TP2 rate: 43.2% (baseline 43.2%)
+    IS  :  216 trades ( 17 blocked, 7%), WR  76.9%, PF  1.339 (dPF  -3.4%), $ +2427.22 (d$   -533), Sharpe  1.753 (d-0.231), MaxDD $ -869.10
+      TP2 rate: 42.1% (baseline 43.3%)
+    OOS :  201 trades ( 29 blocked, 13%), WR  79.1%, PF  1.677 (dPF  +9.7%), $ +3684.92 (d$   +176), Sharpe  3.104 (d+0.557), MaxDD $ -692.48
+      TP2 rate: 44.3% (baseline 43.0%)
+
+  --- Threshold: TP2=25 ---
+
+  remain_TP2=25_lb5  [FAIL]
+    FULL:  403 trades ( 60 blocked, 13%), WR  77.7%, PF  1.514 (dPF  +4.3%), $ +6265.26 (d$   -204), Sharpe  2.507 (d+0.254), MaxDD $ -792.74
+      TP2 rate: 43.9% (baseline 43.2%)
+    IS  :  204 trades ( 29 blocked, 12%), WR  76.5%, PF  1.351 (dPF  -2.5%), $ +2380.68 (d$   -580), Sharpe  1.812 (d-0.172), MaxDD $ -792.74
+      TP2 rate: 42.2% (baseline 43.3%)
+    OOS :  199 trades ( 31 blocked, 13%), WR  78.9%, PF  1.719 (dPF +12.4%), $ +3884.58 (d$   +375), Sharpe  3.290 (d+0.743), MaxDD $ -759.10
+      TP2 rate: 45.7% (baseline 43.0%)
+
+  remain_TP2=25_lb10  [FAIL]
+    FULL:  404 trades ( 59 blocked, 13%), WR  78.5%, PF  1.594 (dPF  +9.8%), $ +6930.68 (d$   +461), Sharpe  2.807 (d+0.554), MaxDD $ -792.74
+      TP2 rate: 44.6% (baseline 43.2%)
+    IS  :  211 trades ( 22 blocked, 9%), WR  76.8%, PF  1.360 (dPF  -1.9%), $ +2516.62 (d$   -444), Sharpe  1.855 (d-0.129), MaxDD $ -792.74
+      TP2 rate: 43.1% (baseline 43.3%)
+    OOS :  193 trades ( 37 blocked, 16%), WR  80.3%, PF  1.942 (dPF +27.0%), $ +4414.06 (d$   +905), Sharpe  3.997 (d+1.450), MaxDD $ -692.48
+      TP2 rate: 46.1% (baseline 43.0%)
+
+  remain_TP2=25_lb14  [FAIL]
+    FULL:  402 trades ( 61 blocked, 13%), WR  78.4%, PF  1.569 (dPF  +8.1%), $ +6644.84 (d$   +175), Sharpe  2.704 (d+0.451), MaxDD $ -792.74
+      TP2 rate: 43.8% (baseline 43.2%)
+    IS  :  212 trades ( 21 blocked, 9%), WR  76.9%, PF  1.351 (dPF  -2.5%), $ +2454.04 (d$   -506), Sharpe  1.807 (d-0.177), MaxDD $ -792.74
+      TP2 rate: 42.5% (baseline 43.3%)
+    OOS :  190 trades ( 40 blocked, 17%), WR  80.0%, PF  1.895 (dPF +23.9%), $ +4190.80 (d$   +682), Sharpe  3.838 (d+1.291), MaxDD $ -692.48
+      TP2 rate: 45.3% (baseline 43.0%)
+
+  remain_TP2=25_lb20  [FAIL]
+    FULL:  409 trades ( 54 blocked, 12%), WR  77.8%, PF  1.468 (dPF  +1.1%), $ +5820.78 (d$   -649), Sharpe  2.302 (d+0.049), MaxDD $ -792.74
+      TP2 rate: 43.0% (baseline 43.2%)
+    IS  :  212 trades ( 21 blocked, 9%), WR  76.9%, PF  1.350 (dPF  -2.6%), $ +2445.54 (d$   -515), Sharpe  1.801 (d-0.183), MaxDD $ -792.74
+      TP2 rate: 42.5% (baseline 43.3%)
+    OOS :  197 trades ( 33 blocked, 14%), WR  78.7%, PF  1.620 (dPF  +6.0%), $ +3375.24 (d$   -134), Sharpe  2.890 (d+0.343), MaxDD $ -692.48
+      TP2 rate: 43.7% (baseline 43.0%)
+
+========================================================================================================================
+SUMMARY — All Configs Sorted by OOS Sharpe
+========================================================================================================================
+
+                                Label         Verdict | FULL N FULL PF     FULL$ FULL Sh |  IS PF      IS$  IS Sh |  OOS PF     OOS$  OOS Sh
+  --------------------------------------------------------------------------------------------------------------------------------------------
+                             BASELINE             --- |    463   1.452 $   +6469   2.253 |  1.386 $  +2960  1.984 |   1.529 $  +3509   2.547
+                   remain_TP2=25_lb10            FAIL |    404   1.594 $   +6931   2.807 |  1.360 $  +2517  1.855 |   1.942 $  +4414   3.997
+                        rng_lb10_t0.9   MARGINAL PASS |    404   1.627 $   +7193   2.931 |  1.421 $  +2856  2.119 |   1.926 $  +4338   3.941 <<<
+                        rng_lb14_t0.9            FAIL |    402   1.573 $   +6694   2.724 |  1.340 $  +2379  1.758 |   1.921 $  +4315   3.936
+                    remain_TP1=7_lb14            FAIL |    415   1.580 $   +6972   2.752 |  1.346 $  +2478  1.791 |   1.925 $  +4494   3.934
+                         dir_lb5_t0.6   MARGINAL PASS |    425   1.610 $   +7462   2.885 |  1.408 $  +2899  2.084 |   1.892 $  +4563   3.840 <<<
+                   remain_TP2=25_lb14            FAIL |    402   1.569 $   +6645   2.704 |  1.351 $  +2454  1.807 |   1.895 $  +4191   3.838
+                        dir_lb14_t0.7            FAIL |    443   1.560 $   +7290   2.689 |  1.336 $  +2592  1.762 |   1.883 $  +4698   3.815
+                        dir_lb14_t0.6   MARGINAL PASS |    430   1.605 $   +7522   2.867 |  1.403 $  +2873  2.060 |   1.874 $  +4649   3.801 <<<
+                        dir_lb20_t0.4            FAIL |    392   1.534 $   +6325   2.599 |  1.312 $  +2177  1.640 |   1.849 $  +4149   3.773
+                        dir_lb10_t0.6            FAIL |    426   1.589 $   +7328   2.809 |  1.385 $  +2744  1.984 |   1.862 $  +4585   3.759
+                  comb_lb10_r0.9_d0.6   MARGINAL PASS |    431   1.604 $   +7519   2.862 |  1.414 $  +2948  2.102 |   1.859 $  +4571   3.748 <<<
+                         dir_lb5_t0.5   MARGINAL PASS |    405   1.604 $   +7142   2.875 |  1.433 $  +2917  2.187 |   1.829 $  +4225   3.685 <<<
+                        rng_lb10_t0.8            FAIL |    389   1.531 $   +6091   2.551 |  1.326 $  +2211  1.690 |   1.828 $  +3880   3.616
+                        dir_lb20_t0.6            FAIL |    433   1.549 $   +7051   2.650 |  1.350 $  +2572  1.818 |   1.815 $  +4479   3.614
+                        dir_lb10_t0.5            FAIL |    408   1.557 $   +6820   2.697 |  1.377 $  +2616  1.948 |   1.792 $  +4204   3.559
+                  comb_lb10_r0.8_d0.5            FAIL |    421   1.554 $   +6886   2.664 |  1.371 $  +2640  1.904 |   1.798 $  +4246   3.556
+                        rng_lb14_t0.8            FAIL |    387   1.536 $   +6052   2.561 |  1.350 $  +2373  1.797 |   1.816 $  +3679   3.547
+                        dir_lb14_t0.4   MARGINAL PASS |    386   1.556 $   +6445   2.695 |  1.386 $  +2528  1.982 |   1.776 $  +3917   3.521 <<<
+                        dir_lb10_t0.7            FAIL |    440   1.540 $   +7038   2.610 |  1.355 $  +2667  1.849 |   1.792 $  +4371   3.504
+                  comb_lb10_r0.8_d0.7            FAIL |    440   1.540 $   +7038   2.610 |  1.355 $  +2667  1.849 |   1.792 $  +4371   3.504
+                        dir_lb14_t0.3     STRONG PASS |    347   1.608 $   +6182   2.892 |  1.478 $  +2682  2.369 |   1.769 $  +3500   3.490 <<<
+                        dir_lb20_t0.7            FAIL |    446   1.521 $   +6970   2.540 |  1.330 $  +2534  1.731 |   1.780 $  +4436   3.484
+                         dir_lb5_t0.4            FAIL |    379   1.496 $   +5794   2.447 |  1.292 $  +1971  1.560 |   1.775 $  +3824   3.480
+                        rng_lb20_t1.1            FAIL |    431   1.532 $   +6833   2.578 |  1.349 $  +2562  1.810 |   1.775 $  +4271   3.474
+                         rng_lb5_t0.7            FAIL |    350   1.526 $   +5508   2.547 |  1.358 $  +2213  1.850 |   1.769 $  +3294   3.429
+                        dir_lb14_t0.5   MARGINAL PASS |    408   1.555 $   +6807   2.684 |  1.401 $  +2786  2.053 |   1.756 $  +4021   3.423 <<<
+                        dir_lb10_t0.4   MARGINAL PASS |    378   1.555 $   +6276   2.681 |  1.397 $  +2530  2.037 |   1.759 $  +3746   3.421 <<<
+                        dir_lb20_t0.5            FAIL |    414   1.537 $   +6693   2.602 |  1.373 $  +2666  1.919 |   1.757 $  +4027   3.419
+                         dir_lb5_t0.7   MARGINAL PASS |    440   1.559 $   +7252   2.692 |  1.406 $  +2964  2.079 |   1.756 $  +4288   3.394 <<<
+                         dir_lb5_t0.8            FAIL |    450   1.520 $   +6970   2.526 |  1.343 $  +2644  1.796 |   1.760 $  +4326   3.378
+                    remain_TP1=7_lb10   MARGINAL PASS |    417   1.547 $   +6796   2.638 |  1.393 $  +2750  2.004 |   1.744 $  +4046   3.370 <<<
+                        dir_lb10_t0.3   MARGINAL PASS |    342   1.552 $   +5647   2.661 |  1.410 $  +2325  2.062 |   1.730 $  +3322   3.349 <<<
+                        dir_lb10_t0.8            FAIL |    446   1.515 $   +6892   2.513 |  1.351 $  +2698  1.835 |   1.736 $  +4194   3.311
+                         rng_lb5_t1.1            FAIL |    428   1.513 $   +6652   2.509 |  1.354 $  +2599  1.836 |   1.720 $  +4053   3.290
+                    remain_TP2=25_lb5            FAIL |    403   1.514 $   +6265   2.507 |  1.351 $  +2381  1.812 |   1.719 $  +3885   3.290
+                        dir_lb20_t0.8            FAIL |    451   1.508 $   +6872   2.481 |  1.344 $  +2637  1.795 |   1.723 $  +4235   3.270
+                        dir_lb14_t0.8            FAIL |    449   1.505 $   +6835   2.472 |  1.340 $  +2611  1.780 |   1.721 $  +4223   3.268
+                        rng_lb20_t1.0            FAIL |    420   1.508 $   +6400   2.470 |  1.352 $  +2521  1.814 |   1.713 $  +3880   3.241
+                         dir_lb5_t0.3            FAIL |    341   1.510 $   +5316   2.490 |  1.360 $  +2035  1.845 |   1.688 $  +3281   3.189
+                         rng_lb5_t1.0            FAIL |    422   1.509 $   +6518   2.490 |  1.369 $  +2643  1.897 |   1.689 $  +3875   3.174
+                     remain_TP1=7_lb5   MARGINAL PASS |    418   1.526 $   +6639   2.560 |  1.399 $  +2789  2.027 |   1.684 $  +3850   3.169 <<<
+                    remain_TP1=7_lb20            FAIL |    417   1.485 $   +6112   2.373 |  1.339 $  +2427  1.753 |   1.677 $  +3685   3.104
+                         rng_lb5_t0.8            FAIL |    380   1.499 $   +5694   2.435 |  1.371 $  +2375  1.898 |   1.662 $  +3319   3.064
+                         rng_lb5_t0.9            FAIL |    405   1.495 $   +6141   2.433 |  1.364 $  +2470  1.872 |   1.653 $  +3670   3.054
+                        rng_lb10_t1.1   MARGINAL PASS |    430   1.514 $   +6681   2.508 |  1.405 $  +2900  2.060 |   1.648 $  +3780   3.015 <<<
+                        rng_lb10_t1.0   MARGINAL PASS |    419   1.500 $   +6406   2.454 |  1.393 $  +2750  2.004 |   1.627 $  +3657   2.956 <<<
+                        rng_lb20_t0.9            FAIL |    410   1.453 $   +5716   2.246 |  1.317 $  +2270  1.656 |   1.633 $  +3445   2.945
+                        rng_lb14_t0.7            FAIL |    356   1.431 $   +4775   2.145 |  1.288 $  +1900  1.527 |   1.640 $  +2875   2.942
+                        dir_lb20_t0.3     STRONG PASS |    353   1.557 $   +5803   2.676 |  1.504 $  +2856  2.449 |   1.619 $  +2947   2.942 <<<
+                        rng_lb14_t1.0            FAIL |    425   1.486 $   +6306   2.391 |  1.373 $  +2673  1.911 |   1.625 $  +3633   2.938
+                  comb_lb10_r1.0_d0.7            FAIL |    442   1.476 $   +6464   2.358 |  1.355 $  +2667  1.849 |   1.625 $  +3797   2.930
+                        rng_lb10_t0.7            FAIL |    356   1.404 $   +4553   2.031 |  1.253 $  +1715  1.361 |   1.631 $  +2837   2.905
+                   remain_TP2=25_lb20            FAIL |    409   1.468 $   +5821   2.302 |  1.350 $  +2446  1.801 |   1.620 $  +3375   2.890
+                        rng_lb14_t1.1   MARGINAL PASS |    432   1.493 $   +6492   2.423 |  1.402 $  +2879  2.039 |   1.602 $  +3614   2.855 <<<
+                  comb_lb10_r1.0_d0.5            FAIL |    431   1.468 $   +6266   2.329 |  1.363 $  +2662  1.879 |   1.595 $  +3604   2.835
+                        rng_lb10_t1.2   MARGINAL PASS |    437   1.503 $   +6629   2.457 |  1.421 $  +3020  2.124 |   1.600 $  +3609   2.831 <<<
+                        rng_lb20_t0.8            FAIL |    390   1.436 $   +5256   2.168 |  1.322 $  +2253  1.681 |   1.594 $  +3002   2.780
+                        rng_lb14_t1.2            FAIL |    442   1.442 $   +6148   2.221 |  1.386 $  +2829  1.976 |   1.505 $  +3319   2.485
+                        rng_lb20_t1.2            FAIL |    443   1.432 $   +6026   2.174 |  1.386 $  +2829  1.976 |   1.483 $  +3196   2.388
+                         rng_lb5_t1.2            FAIL |    444   1.444 $   +6199   2.229 |  1.413 $  +3029  2.096 |   1.478 $  +3170   2.373
+                        rng_lb20_t0.7            FAIL |    365   1.340 $   +4028   1.753 |  1.239 $  +1670  1.289 |   1.485 $  +2359   2.361
+
+========================================================================================================================
+SWEEP COMPLETE
+========================================================================================================================

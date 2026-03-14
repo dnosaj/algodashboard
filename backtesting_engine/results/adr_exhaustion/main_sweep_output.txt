@@ -1,0 +1,841 @@
+/Users/jasongeorge/Desktop/NQ trading/backtesting_engine/strategies/v10_test_common.py:249: RuntimeWarning: invalid value encountered in divide
+  rs = np.where(al > 0, ag / al, 100.0)
+/Users/jasongeorge/Desktop/NQ trading/backtesting_engine/strategies/v10_test_common.py:249: RuntimeWarning: invalid value encountered in divide
+  rs = np.where(al > 0, ag / al, 100.0)
+/Users/jasongeorge/Desktop/NQ trading/backtesting_engine/strategies/v10_test_common.py:249: RuntimeWarning: invalid value encountered in divide
+  rs = np.where(al > 0, ag / al, 100.0)
+/Users/jasongeorge/Desktop/NQ trading/backtesting_engine/strategies/v10_test_common.py:249: RuntimeWarning: invalid value encountered in divide
+  rs = np.where(al > 0, ag / al, 100.0)
+/Users/jasongeorge/Desktop/NQ trading/backtesting_engine/strategies/v10_test_common.py:200: RuntimeWarning: invalid value encountered in divide
+  rs = np.where(al > 0, ag / al, 100.0)
+/Users/jasongeorge/Desktop/NQ trading/backtesting_engine/strategies/v10_test_common.py:200: RuntimeWarning: invalid value encountered in divide
+  rs = np.where(al > 0, ag / al, 100.0)
+/Users/jasongeorge/Desktop/NQ trading/backtesting_engine/strategies/v10_test_common.py:200: RuntimeWarning: invalid value encountered in divide
+  rs = np.where(al > 0, ag / al, 100.0)
+/Users/jasongeorge/Desktop/NQ trading/backtesting_engine/strategies/v10_test_common.py:200: RuntimeWarning: invalid value encountered in divide
+  rs = np.where(al > 0, ag / al, 100.0)
+/Users/jasongeorge/Desktop/NQ trading/backtesting_engine/strategies/v10_test_common.py:200: RuntimeWarning: invalid value encountered in divide
+  rs = np.where(al > 0, ag / al, 100.0)
+/Users/jasongeorge/Desktop/NQ trading/backtesting_engine/strategies/v10_test_common.py:200: RuntimeWarning: invalid value encountered in divide
+  rs = np.where(al > 0, ag / al, 100.0)
+Loaded MNQ: 368251 bars, 2025-02-17 00:00:00 to 2026-03-05 23:59:00
+Loaded MES: 368786 bars, 2025-02-17 00:00:00 to 2026-03-05 23:59:00
+  MNQ split: IS 184125 bars (2025-02-17_to_2025-08-25), OOS 184126 bars (2025-08-25_to_2026-03-05)
+  MES split: IS 184393 bars (2025-02-17_to_2025-08-26), OOS 184393 bars (2025-08-26_to_2026-03-05)
+
+Precomputing session tracking and ADR...
+  MNQ: session tracking + ADR computed
+  MES: session tracking + ADR computed
+
+========================================================================================================================
+LAYER 1: Basic ADR Range Gate — block ALL entries when today_range / ADR >= threshold
+========================================================================================================================
+
+========================================================================================================================
+ADR Range Exhaustion (Layer 1) SWEEP (pre-filter, all 3 strategies)
+========================================================================================================================
+
+Running baselines...
+   vScalpA baseline: 472 trades, WR 84.5%, PF 1.289, $+1948
+   vScalpB baseline: 376 trades, WR 71.5%, PF 1.186, $+889
+    MES_V2 baseline: 540 trades, WR 56.1%, PF 1.332, $+4331
+
+=================================================================================================================================================
+              Config Strategy Split  Trades    WR%      PF       Net$     MaxDD  Sharpe  Blocked    dPF%         Verdict
+-------------------------------------------------------------------------------------------------------------------------------------------------
+                None  vScalpA    IS     235  84.3%   1.341   +1156.60   -404.24   1.734        0   +0.0%
+                None  vScalpA   OOS     237  84.8%   1.236    +791.52   -569.66   1.224        0   +0.0%            FAIL
+                None  vScalpB    IS     181  72.4%   1.252    +556.76   -358.32   1.444        0   +0.0%
+                None  vScalpB   OOS     195  70.8%   1.129    +332.20   -502.14   0.744        0   +0.0%            FAIL
+                None   MES_V2    IS     279  57.0%   1.367   +2591.25  -1168.75   1.865        0   +0.0%
+                None   MES_V2   OOS     261  55.2%   1.292   +1740.00   -672.50   1.522        0   +0.0%            FAIL
+        rng_lb5_t0.7  vScalpA    IS     186  84.4%   1.375    +994.06   -347.74   1.871       49   +2.5%
+        rng_lb5_t0.7  vScalpA   OOS     171  86.0%   1.340    +756.16   -440.98   1.682       66   +8.4%   MARGINAL PASS
+        rng_lb5_t0.7  vScalpB    IS     107  68.2%   0.993     -10.28   -505.64  -0.041       74  -20.7%
+        rng_lb5_t0.7  vScalpB   OOS     103  73.8%   1.321    +370.88   -140.32   1.854       92  +17.0%            FAIL
+        rng_lb5_t0.7   MES_V2    IS     175  58.9%   1.465   +2115.00   -862.50   2.360      104   +7.2%
+        rng_lb5_t0.7   MES_V2   OOS     150  56.0%   1.173    +642.50   -701.25   0.956      111   -9.2%            FAIL
+        rng_lb5_t0.8  vScalpA    IS     197  84.8%   1.393   +1082.62   -347.74   1.945       38   +3.9%
+        rng_lb5_t0.8  vScalpA   OOS     191  85.9%   1.346    +863.86   -386.56   1.717       46   +8.9%   MARGINAL PASS
+        rng_lb5_t0.8  vScalpB    IS     126  71.4%   1.159    +259.96   -436.46   0.926       55   -7.4%
+        rng_lb5_t0.8  vScalpB   OOS     121  75.2%   1.385    +489.16   -170.48   2.166       74  +22.7%            FAIL
+        rng_lb5_t0.8   MES_V2    IS     199  56.8%   1.384   +2060.00   -848.75   1.993       80   +1.2%
+        rng_lb5_t0.8   MES_V2   OOS     175  53.1%   1.082    +356.25   -727.50   0.470       86  -16.3%            FAIL
+        rng_lb5_t0.9  vScalpA    IS     207  84.5%   1.356   +1049.72   -347.74   1.789       28   +1.1%
+        rng_lb5_t0.9  vScalpA   OOS     207  85.5%   1.325    +908.22   -408.84   1.622       30   +7.2%   MARGINAL PASS
+        rng_lb5_t0.9  vScalpB    IS     139  71.9%   1.185    +323.44   -436.46   1.071       42   -5.4%
+        rng_lb5_t0.9  vScalpB   OOS     134  73.1%   1.238    +359.14   -211.92   1.430       61   +9.7%            FAIL
+        rng_lb5_t0.9   MES_V2    IS     223  56.5%   1.317   +1920.00  -1203.75   1.675       56   -3.7%
+        rng_lb5_t0.9   MES_V2   OOS     191  54.5%   1.136    +615.00   -662.50   0.758       70  -12.1%            FAIL
+        rng_lb5_t1.0  vScalpA    IS     219  84.5%   1.346   +1084.74   -347.74   1.745       16   +0.4%
+        rng_lb5_t1.0  vScalpA   OOS     212  85.8%   1.364   +1018.52   -408.00   1.791       25  +10.4%   MARGINAL PASS
+        rng_lb5_t1.0  vScalpB    IS     150  72.7%   1.228    +414.50   -427.00   1.296       31   -1.9%
+        rng_lb5_t1.0  vScalpB   OOS     139  74.1%   1.289    +435.44   -211.92   1.696       56  +14.2%   MARGINAL PASS
+        rng_lb5_t1.0   MES_V2    IS     234  56.4%   1.339   +2090.00  -1203.75   1.769       45   -2.0%
+        rng_lb5_t1.0   MES_V2   OOS     206  54.4%   1.203    +968.75   -673.75   1.095       55   -6.9%            FAIL
+        rng_lb5_t1.1  vScalpA    IS     222  84.2%   1.328   +1057.62   -347.74   1.673       13   -1.0%
+        rng_lb5_t1.1  vScalpA   OOS     215  86.0%   1.384   +1074.40   -376.04   1.874       22  +12.0%   MARGINAL PASS
+        rng_lb5_t1.1  vScalpB    IS     155  72.3%   1.206    +388.80   -397.58   1.186       26   -3.7%
+        rng_lb5_t1.1  vScalpB   OOS     153  73.9%   1.423    +703.38   -200.14   2.211       42  +26.0%   MARGINAL PASS
+        rng_lb5_t1.1   MES_V2    IS     239  56.5%   1.360   +2236.25  -1140.00   1.862       40   -0.5%
+        rng_lb5_t1.1   MES_V2   OOS     221  54.3%   1.214   +1066.25   -673.75   1.138       40   -6.0%            FAIL
+        rng_lb5_t1.2  vScalpA    IS     228  84.6%   1.383   +1233.88   -347.74   1.911        7   +3.1%
+        rng_lb5_t1.2  vScalpA   OOS     225  84.4%   1.215    +702.00   -568.12   1.126       12   -1.7%   MARGINAL PASS
+        rng_lb5_t1.2  vScalpB    IS     163  71.8%   1.195    +392.98   -397.58   1.133       18   -4.6%
+        rng_lb5_t1.2  vScalpB   OOS     163  72.4%   1.254    +497.98   -291.18   1.423       32  +11.1%   MARGINAL PASS
+        rng_lb5_t1.2   MES_V2    IS     245  57.1%   1.374   +2325.00  -1140.00   1.910       34   +0.5%
+        rng_lb5_t1.2   MES_V2   OOS     230  55.7%   1.298   +1505.00   -570.00   1.540       31   +0.5%   MARGINAL PASS
+       rng_lb10_t0.7  vScalpA    IS     194  83.5%   1.245    +720.74   -347.74   1.280       41   -7.2%
+       rng_lb10_t0.7  vScalpA   OOS     169  85.2%   1.291    +678.74   -437.30   1.465       68   +4.4%            FAIL
+       rng_lb10_t0.7  vScalpB    IS     114  66.7%   0.951     -85.06   -505.64  -0.320       67  -24.0%
+       rng_lb10_t0.7  vScalpB   OOS     101  76.2%   1.507    +517.96   -140.32   2.723       94  +33.5%            FAIL
+       rng_lb10_t0.7   MES_V2    IS     189  54.0%   1.246   +1275.00   -858.75   1.336       90   -8.9%
+       rng_lb10_t0.7   MES_V2   OOS     156  55.1%   1.109    +412.50   -748.75   0.608      105  -14.2%            FAIL
+       rng_lb10_t0.8  vScalpA    IS     206  84.5%   1.338    +995.76   -347.74   1.705       29   -0.2%
+       rng_lb10_t0.8  vScalpA   OOS     192  86.5%   1.436   +1054.32   -417.46   2.079       45  +16.2%   MARGINAL PASS
+       rng_lb10_t0.8  vScalpB    IS     135  70.4%   1.072    +130.10   -493.84   0.438       46  -14.4%
+       rng_lb10_t0.8  vScalpB   OOS     118  77.1%   1.518    +590.28   -147.02   2.755       77  +34.5%            FAIL
+       rng_lb10_t0.8   MES_V2    IS     207  53.1%   1.180   +1042.50  -1280.00   1.006       72  -13.7%
+       rng_lb10_t0.8   MES_V2   OOS     178  52.8%   1.102    +435.00   -858.75   0.564       83  -14.7%            FAIL
+       rng_lb10_t0.9  vScalpA    IS     214  85.0%   1.416   +1225.44   -347.74   2.044       21   +5.6%
+       rng_lb10_t0.9  vScalpA   OOS     199  86.9%   1.502   +1213.04   -408.00   2.339       38  +21.5%     STRONG PASS
+       rng_lb10_t0.9  vScalpB    IS     141  70.9%   1.092    +170.86   -451.46   0.559       40  -12.8%
+       rng_lb10_t0.9  vScalpB   OOS     131  76.3%   1.494    +643.26   -144.72   2.643       64  +32.3%            FAIL
+       rng_lb10_t0.9   MES_V2    IS     216  54.6%   1.247   +1435.00  -1222.50   1.340       63   -8.8%
+       rng_lb10_t0.9   MES_V2   OOS     193  53.9%   1.134    +615.00   -702.50   0.741       68  -12.2%            FAIL
+       rng_lb10_t1.0  vScalpA    IS     216  84.7%   1.379   +1156.86   -347.74   1.891       19   +2.8%
+       rng_lb10_t1.0  vScalpA   OOS     212  84.9%   1.259    +775.02   -536.00   1.331       25   +1.9%   MARGINAL PASS
+       rng_lb10_t1.0  vScalpB    IS     150  70.7%   1.090    +175.50   -433.50   0.547       31  -12.9%
+       rng_lb10_t1.0  vScalpB   OOS     145  74.5%   1.329    +525.70   -195.32   1.879       50  +17.7%            FAIL
+       rng_lb10_t1.0   MES_V2    IS     232  56.0%   1.321   +1932.50  -1212.50   1.690       47   -3.4%
+       rng_lb10_t1.0   MES_V2   OOS     206  54.4%   1.208    +975.00   -673.75   1.111       55   -6.5%            FAIL
+       rng_lb10_t1.1  vScalpA    IS     222  84.7%   1.368   +1155.12   -347.74   1.843       13   +2.0%
+       rng_lb10_t1.1  vScalpA   OOS     217  85.3%   1.288    +862.32   -530.82   1.461       20   +4.2%   MARGINAL PASS
+       rng_lb10_t1.1  vScalpB    IS     160  70.6%   1.114    +236.10   -433.50   0.687       21  -11.0%
+       rng_lb10_t1.1  vScalpB   OOS     149  75.2%   1.367    +585.54   -195.32   2.060       46  +21.1%            FAIL
+       rng_lb10_t1.1   MES_V2    IS     242  56.2%   1.338   +2097.50  -1148.75   1.770       37   -2.1%
+       rng_lb10_t1.1   MES_V2   OOS     218  55.5%   1.281   +1363.75   -570.00   1.467       43   -0.9%            FAIL
+       rng_lb10_t1.2  vScalpA    IS     226  85.0%   1.389   +1221.96   -347.74   1.931        9   +3.6%
+       rng_lb10_t1.2  vScalpA   OOS     220  85.5%   1.305    +912.70   -530.82   1.535       17   +5.6%   MARGINAL PASS
+       rng_lb10_t1.2  vScalpB    IS     164  71.3%   1.142    +294.44   -409.04   0.845       17   -8.8%
+       rng_lb10_t1.2  vScalpB   OOS     154  74.7%   1.325    +547.34   -195.32   1.857       41  +17.4%            FAIL
+       rng_lb10_t1.2   MES_V2    IS     254  56.3%   1.329   +2136.25  -1141.25   1.711       25   -2.8%
+       rng_lb10_t1.2   MES_V2   OOS     225  55.6%   1.301   +1486.25   -570.00   1.559       36   +0.7%   MARGINAL PASS
+       rng_lb14_t0.7  vScalpA    IS     193  83.9%   1.280    +798.78   -347.74   1.441       42   -4.5%
+       rng_lb14_t0.7  vScalpA   OOS     171  85.4%   1.277    +645.66   -437.30   1.392       66   +3.3%   MARGINAL PASS
+       rng_lb14_t0.7  vScalpB    IS     131  70.2%   1.122    +217.26   -461.80   0.730       50  -10.4%
+       rng_lb14_t0.7  vScalpB   OOS      99  78.8%   1.708    +624.54   -148.44   3.525       96  +51.3%            FAIL
+       rng_lb14_t0.7   MES_V2    IS     196  54.1%   1.287   +1502.50   -888.75   1.527       83   -5.9%
+       rng_lb14_t0.7   MES_V2   OOS     163  53.4%   1.053    +210.00   -890.00   0.301       98  -18.5%            FAIL
+       rng_lb14_t0.8  vScalpA    IS     209  84.7%   1.361   +1062.64   -347.74   1.804       26   +1.5%
+       rng_lb14_t0.8  vScalpA   OOS     187  86.6%   1.451   +1051.52   -437.30   2.134       50  +17.4%   MARGINAL PASS
+       rng_lb14_t0.8  vScalpB    IS     139  71.9%   1.183    +326.44   -443.84   1.061       42   -5.5%
+       rng_lb14_t0.8  vScalpB   OOS     118  77.1%   1.516    +589.78   -174.94   2.744       77  +34.3%            FAIL
+       rng_lb14_t0.8   MES_V2    IS     215  53.5%   1.206   +1215.00  -1213.75   1.136       64  -11.8%
+       rng_lb14_t0.8   MES_V2   OOS     177  53.1%   1.116    +485.00   -707.50   0.636       84  -13.6%            FAIL
+       rng_lb14_t0.9  vScalpA    IS     213  84.5%   1.344   +1048.98   -347.74   1.733       22   +0.2%
+       rng_lb14_t0.9  vScalpA   OOS     198  86.9%   1.480   +1160.58   -408.00   2.249       39  +19.7%   MARGINAL PASS
+       rng_lb14_t0.9  vScalpB    IS     147  71.4%   1.173    +325.62   -475.88   1.012       34   -6.3%
+       rng_lb14_t0.9  vScalpB   OOS     128  76.6%   1.504    +640.38   -120.12   2.684       67  +33.2%            FAIL
+       rng_lb14_t0.9   MES_V2    IS     228  54.8%   1.270   +1637.50  -1233.75   1.457       51   -7.1%
+       rng_lb14_t0.9   MES_V2   OOS     196  55.6%   1.264   +1153.75   -526.25   1.369       65   -2.2%            FAIL
+       rng_lb14_t1.0  vScalpA    IS     221  84.6%   1.357   +1120.16   -347.74   1.794       14   +1.2%
+       rng_lb14_t1.0  vScalpA   OOS     213  85.0%   1.272    +809.98   -530.82   1.390       24   +2.9%   MARGINAL PASS
+       rng_lb14_t1.0  vScalpB    IS     154  70.8%   1.128    +257.34   -433.50   0.769       27   -9.9%
+       rng_lb14_t1.0  vScalpB   OOS     142  76.8%   1.456    +658.32   -195.32   2.452       53  +29.0%            FAIL
+       rng_lb14_t1.0   MES_V2    IS     239  54.4%   1.278   +1736.25  -1176.25   1.486       40   -6.5%
+       rng_lb14_t1.0   MES_V2   OOS     211  55.5%   1.276   +1300.00   -688.75   1.443       50   -1.2%            FAIL
+       rng_lb14_t1.1  vScalpA    IS     224  84.8%   1.378   +1186.04   -347.74   1.883       11   +2.8%
+       rng_lb14_t1.1  vScalpA   OOS     217  84.8%   1.249    +764.82   -530.82   1.283       20   +1.1%   MARGINAL PASS
+       rng_lb14_t1.1  vScalpB    IS     160  70.6%   1.112    +232.60   -433.50   0.676       21  -11.2%
+       rng_lb14_t1.1  vScalpB   OOS     149  75.2%   1.359    +572.54   -195.32   2.016       46  +20.4%            FAIL
+       rng_lb14_t1.1   MES_V2    IS     245  54.3%   1.302   +1905.00  -1176.25   1.598       34   -4.8%
+       rng_lb14_t1.1   MES_V2   OOS     220  55.5%   1.349   +1663.75   -570.00   1.774       41   +4.4%   MARGINAL PASS
+       rng_lb14_t1.2  vScalpA    IS     226  84.5%   1.351   +1129.96   -347.74   1.771        9   +0.7%
+       rng_lb14_t1.2  vScalpA   OOS     225  84.0%   1.171    +573.50   -595.62   0.914       12   -5.3%            FAIL
+       rng_lb14_t1.2  vScalpB    IS     163  71.2%   1.138    +285.48   -433.50   0.821       18   -9.1%
+       rng_lb14_t1.2  vScalpB   OOS     159  73.6%   1.252    +452.14   -228.88   1.487       36  +10.9%            FAIL
+       rng_lb14_t1.2   MES_V2    IS     253  55.7%   1.353   +2223.75  -1168.75   1.826       26   -1.0%
+       rng_lb14_t1.2   MES_V2   OOS     228  55.3%   1.292   +1470.00   -570.00   1.511       33   +0.0%            FAIL
+       rng_lb20_t0.7  vScalpA    IS     200  83.5%   1.229    +700.00   -347.74   1.208       35   -8.4%
+       rng_lb20_t0.7  vScalpA   OOS     173  84.4%   1.148    +372.08   -447.76   0.787       64   -7.1%            FAIL
+       rng_lb20_t0.7  vScalpB    IS     131  69.5%   1.092    +165.76   -453.30   0.559       50  -12.8%
+       rng_lb20_t0.7  vScalpB   OOS     103  75.7%   1.452    +466.88   -148.44   2.466       92  +28.6%            FAIL
+       rng_lb20_t0.7   MES_V2    IS     211  55.0%   1.250   +1447.50  -1205.00   1.364       68   -8.6%
+       rng_lb20_t0.7   MES_V2   OOS     165  54.5%   1.133    +515.00   -675.00   0.729       96  -12.3%            FAIL
+       rng_lb20_t0.8  vScalpA    IS     210  84.3%   1.311    +948.60   -347.74   1.584       25   -2.2%
+       rng_lb20_t0.8  vScalpA   OOS     189  85.2%   1.275    +714.94   -437.30   1.390       48   +3.2%   MARGINAL PASS
+       rng_lb20_t0.8  vScalpB    IS     150  72.0%   1.198    +374.00   -401.46   1.146       31   -4.3%
+       rng_lb20_t0.8  vScalpB   OOS     117  76.9%   1.552    +615.82   -140.32   2.926       78  +37.5%            FAIL
+       rng_lb20_t0.8   MES_V2    IS     226  54.9%   1.282   +1681.25  -1281.25   1.509       53   -6.2%
+       rng_lb20_t0.8   MES_V2   OOS     180  53.3%   1.164    +665.00   -558.75   0.880       81   -9.9%            FAIL
+       rng_lb20_t0.9  vScalpA    IS     215  84.2%   1.307    +962.90   -347.74   1.570       20   -2.5%
+       rng_lb20_t0.9  vScalpA   OOS     204  85.3%   1.283    +790.34   -427.84   1.429       33   +3.8%   MARGINAL PASS
+       rng_lb20_t0.9  vScalpB    IS     152  71.7%   1.174    +336.42   -401.46   1.017       29   -6.2%
+       rng_lb20_t0.9  vScalpB   OOS     131  77.1%   1.530    +667.76   -174.94   2.829       64  +35.5%            FAIL
+       rng_lb20_t0.9   MES_V2    IS     233  54.5%   1.263   +1611.25  -1258.75   1.415       46   -7.6%
+       rng_lb20_t0.9   MES_V2   OOS     192  54.7%   1.223    +971.25   -648.75   1.178       69   -5.3%            FAIL
+       rng_lb20_t1.0  vScalpA    IS     219  84.5%   1.345   +1081.74   -347.74   1.741       16   +0.3%
+       rng_lb20_t1.0  vScalpA   OOS     210  85.7%   1.345    +965.10   -408.00   1.708       27   +8.8%   MARGINAL PASS
+       rng_lb20_t1.0  vScalpB    IS     159  71.7%   1.180    +360.64   -385.04   1.052       22   -5.8%
+       rng_lb20_t1.0  vScalpB   OOS     150  75.3%   1.412    +632.50   -147.66   2.287       45  +25.1%            FAIL
+       rng_lb20_t1.0   MES_V2    IS     245  54.7%   1.290   +1820.00  -1168.75   1.536       34   -5.6%
+       rng_lb20_t1.0   MES_V2   OOS     210  55.2%   1.301   +1403.75   -688.75   1.556       51   +0.7%            FAIL
+       rng_lb20_t1.1  vScalpA    IS     223  84.3%   1.331   +1065.58   -364.22   1.682       12   -0.7%
+       rng_lb20_t1.1  vScalpA   OOS     217  85.7%   1.340    +977.82   -408.00   1.684       20   +8.4%   MARGINAL PASS
+       rng_lb20_t1.1  vScalpB    IS     165  71.5%   1.165    +342.40   -373.58   0.973       16   -6.9%
+       rng_lb20_t1.1  vScalpB   OOS     156  74.4%   1.341    +567.76   -155.82   1.959       39  +18.8%            FAIL
+       rng_lb20_t1.1   MES_V2    IS     252  56.0%   1.352   +2207.50  -1168.75   1.819       27   -1.1%
+       rng_lb20_t1.1   MES_V2   OOS     225  54.7%   1.261   +1342.50   -673.75   1.377       36   -2.4%            FAIL
+       rng_lb20_t1.2  vScalpA    IS     226  84.5%   1.351   +1129.96   -347.74   1.771        9   +0.7%
+       rng_lb20_t1.2  vScalpA   OOS     226  84.1%   1.173    +579.46   -600.08   0.922       11   -5.1%            FAIL
+       rng_lb20_t1.2  vScalpB    IS     166  71.7%   1.178    +369.36   -373.58   1.044       15   -5.9%
+       rng_lb20_t1.2  vScalpB   OOS     161  73.3%   1.233    +427.56   -228.88   1.386       34   +9.2%            FAIL
+       rng_lb20_t1.2   MES_V2    IS     255  55.7%   1.347   +2187.50  -1168.75   1.791       24   -1.5%
+       rng_lb20_t1.2   MES_V2   OOS     233  54.9%   1.246   +1326.25   -570.00   1.308       28   -3.6%            FAIL
+
+====================================================================================================
+PORTFOLIO AGGREGATE (sum across strategies)
+====================================================================================================
+              Config    IS_Net$   OOS_Net$  IS_Sharpe OOS_Sharpe         Verdict
+----------------------------------------------------------------------------------------------------
+                None   +4304.61   +2863.72      1.662      1.232        baseline
+        rng_lb5_t0.7   +3098.78   +1769.54      1.747      1.270
+        rng_lb5_t0.8   +3402.58   +1709.27      1.710      1.092
+        rng_lb5_t0.9   +3293.16   +1882.36      1.522      1.107
+        rng_lb5_t1.0   +3589.24   +2422.71      1.592      1.348
+        rng_lb5_t1.1   +3682.67   +2844.03      1.605      1.493
+        rng_lb5_t1.2   +3951.86   +2704.98      1.686      1.336
+       rng_lb10_t0.7   +1910.68   +1609.20      1.018      1.152
+       rng_lb10_t0.8   +2168.36   +2079.60      1.069      1.321
+       rng_lb10_t0.9   +2831.30   +2471.30      1.354      1.473
+       rng_lb10_t1.0   +3264.86   +2275.72      1.486      1.251
+       rng_lb10_t1.1   +3488.72   +2811.61      1.530      1.488
+       rng_lb10_t1.2   +3652.65   +2946.29      1.546      1.527
+       rng_lb14_t0.7   +2518.54   +1480.20      1.300      1.052
+       rng_lb14_t0.8   +2604.08   +2126.30      1.254      1.372
+       rng_lb14_t0.9   +3012.10   +2954.71      1.391      1.758
+       rng_lb14_t1.0   +3113.75   +2768.30      1.386      1.508
+       rng_lb14_t1.1   +3323.64   +3001.11      1.453      1.576
+       rng_lb14_t1.2   +3639.19   +2495.64      1.565      1.252
+       rng_lb20_t0.7   +2313.26   +1353.96      1.132      0.944
+       rng_lb20_t0.8   +3003.85   +1995.76      1.394      1.287
+       rng_lb20_t0.9   +2910.57   +2429.35      1.325      1.431
+       rng_lb20_t1.0   +3262.38   +3001.35      1.440      1.635
+       rng_lb20_t1.1   +3615.48   +2888.08      1.558      1.485
+       rng_lb20_t1.2   +3686.82   +2333.27      1.579      1.140
+
+================================================================================
+PER-STRATEGY VERDICTS
+================================================================================
+
+  rng_lb5_t0.7:
+     vScalpA: MARGINAL PASS (IS PF +2.5%, OOS PF +8.4%)
+     vScalpB: FAIL (not profitable (IS $-10, OOS $+371))
+      MES_V2: FAIL (trade count too low (IS 63%, OOS 57%))
+
+  rng_lb5_t0.8:
+     vScalpA: MARGINAL PASS (IS PF +3.9%, OOS PF +8.9%)
+     vScalpB: FAIL (trade count too low (IS 70%, OOS 62%))
+      MES_V2: FAIL (trade count too low (IS 71%, OOS 67%))
+
+  rng_lb5_t0.9:
+     vScalpA: MARGINAL PASS (IS PF +1.1%, OOS PF +7.2%)
+     vScalpB: FAIL (trade count too low (IS 77%, OOS 69%))
+      MES_V2: FAIL (PF degrades (IS -3.7%, OOS -12.1%))
+
+  rng_lb5_t1.0:
+     vScalpA: MARGINAL PASS (IS PF +0.4%, OOS PF +10.4%)
+     vScalpB: MARGINAL PASS (IS PF -1.9%, OOS PF +14.2%)
+      MES_V2: FAIL (PF degrades (IS -2.0%, OOS -6.9%))
+
+  rng_lb5_t1.1:
+     vScalpA: MARGINAL PASS (IS PF -1.0%, OOS PF +12.0%)
+     vScalpB: MARGINAL PASS (IS PF -3.7%, OOS PF +26.0%)
+      MES_V2: FAIL (PF degrades (IS -0.5%, OOS -6.0%))
+
+  rng_lb5_t1.2: <<<
+     vScalpA: MARGINAL PASS (IS PF +3.1%, OOS PF -1.7%)
+     vScalpB: MARGINAL PASS (IS PF -4.6%, OOS PF +11.1%)
+      MES_V2: MARGINAL PASS (IS PF +0.5%, OOS PF +0.5%)
+
+  rng_lb10_t0.7:
+     vScalpA: FAIL (PF degrades (IS -7.2%, OOS +4.4%))
+     vScalpB: FAIL (not profitable (IS $-85, OOS $+518))
+      MES_V2: FAIL (trade count too low (IS 68%, OOS 60%))
+
+  rng_lb10_t0.8:
+     vScalpA: MARGINAL PASS (IS PF -0.2%, OOS PF +16.2%)
+     vScalpB: FAIL (trade count too low (IS 75%, OOS 61%))
+      MES_V2: FAIL (trade count too low (IS 74%, OOS 68%))
+
+  rng_lb10_t0.9:
+     vScalpA: STRONG PASS (IS PF +5.6%, OOS PF +21.5%)
+     vScalpB: FAIL (trade count too low (IS 78%, OOS 67%))
+      MES_V2: FAIL (PF degrades (IS -8.8%, OOS -12.2%))
+
+  rng_lb10_t1.0:
+     vScalpA: MARGINAL PASS (IS PF +2.8%, OOS PF +1.9%)
+     vScalpB: FAIL (PF degrades (IS -12.9%, OOS +17.7%))
+      MES_V2: FAIL (PF degrades (IS -3.4%, OOS -6.5%))
+
+  rng_lb10_t1.1:
+     vScalpA: MARGINAL PASS (IS PF +2.0%, OOS PF +4.2%)
+     vScalpB: FAIL (PF degrades (IS -11.0%, OOS +21.1%))
+      MES_V2: FAIL (no improvement (IS PF -2.1%, OOS PF -0.9%))
+
+  rng_lb10_t1.2:
+     vScalpA: MARGINAL PASS (IS PF +3.6%, OOS PF +5.6%)
+     vScalpB: FAIL (PF degrades (IS -8.8%, OOS +17.4%))
+      MES_V2: MARGINAL PASS (IS PF -2.8%, OOS PF +0.7%)
+
+  rng_lb14_t0.7:
+     vScalpA: MARGINAL PASS (IS PF -4.5%, OOS PF +3.3%)
+     vScalpB: FAIL (trade count too low (IS 72%, OOS 51%))
+      MES_V2: FAIL (trade count too low (IS 70%, OOS 62%))
+
+  rng_lb14_t0.8:
+     vScalpA: MARGINAL PASS (IS PF +1.5%, OOS PF +17.4%)
+     vScalpB: FAIL (trade count too low (IS 77%, OOS 61%))
+      MES_V2: FAIL (trade count too low (IS 77%, OOS 68%))
+
+  rng_lb14_t0.9:
+     vScalpA: MARGINAL PASS (IS PF +0.2%, OOS PF +19.7%)
+     vScalpB: FAIL (trade count too low (IS 81%, OOS 66%))
+      MES_V2: FAIL (PF degrades (IS -7.1%, OOS -2.2%))
+
+  rng_lb14_t1.0:
+     vScalpA: MARGINAL PASS (IS PF +1.2%, OOS PF +2.9%)
+     vScalpB: FAIL (PF degrades (IS -9.9%, OOS +29.0%))
+      MES_V2: FAIL (PF degrades (IS -6.5%, OOS -1.2%))
+
+  rng_lb14_t1.1:
+     vScalpA: MARGINAL PASS (IS PF +2.8%, OOS PF +1.1%)
+     vScalpB: FAIL (PF degrades (IS -11.2%, OOS +20.4%))
+      MES_V2: MARGINAL PASS (IS PF -4.8%, OOS PF +4.4%)
+
+  rng_lb14_t1.2:
+     vScalpA: FAIL (PF degrades (IS +0.7%, OOS -5.3%))
+     vScalpB: FAIL (PF degrades (IS -9.1%, OOS +10.9%))
+      MES_V2: FAIL (no improvement (IS PF -1.0%, OOS PF +0.0%))
+
+  rng_lb20_t0.7:
+     vScalpA: FAIL (PF degrades (IS -8.4%, OOS -7.1%))
+     vScalpB: FAIL (trade count too low (IS 72%, OOS 53%))
+      MES_V2: FAIL (trade count too low (IS 76%, OOS 63%))
+
+  rng_lb20_t0.8:
+     vScalpA: MARGINAL PASS (IS PF -2.2%, OOS PF +3.2%)
+     vScalpB: FAIL (trade count too low (IS 83%, OOS 60%))
+      MES_V2: FAIL (trade count too low (IS 81%, OOS 69%))
+
+  rng_lb20_t0.9:
+     vScalpA: MARGINAL PASS (IS PF -2.5%, OOS PF +3.8%)
+     vScalpB: FAIL (trade count too low (IS 84%, OOS 67%))
+      MES_V2: FAIL (PF degrades (IS -7.6%, OOS -5.3%))
+
+  rng_lb20_t1.0:
+     vScalpA: MARGINAL PASS (IS PF +0.3%, OOS PF +8.8%)
+     vScalpB: FAIL (PF degrades (IS -5.8%, OOS +25.1%))
+      MES_V2: FAIL (PF degrades (IS -5.6%, OOS +0.7%))
+
+  rng_lb20_t1.1:
+     vScalpA: MARGINAL PASS (IS PF -0.7%, OOS PF +8.4%)
+     vScalpB: FAIL (PF degrades (IS -6.9%, OOS +18.8%))
+      MES_V2: FAIL (no improvement (IS PF -1.1%, OOS PF -2.4%))
+
+  rng_lb20_t1.2:
+     vScalpA: FAIL (PF degrades (IS +0.7%, OOS -5.1%))
+     vScalpB: FAIL (PF degrades (IS -5.9%, OOS +9.2%))
+      MES_V2: FAIL (no improvement (IS PF -1.5%, OOS PF -3.6%))
+
+========================================================================================================================
+LAYER 2: Directional ADR Gate — block longs when rally/ADR >= thr, shorts when selloff/ADR <= -thr
+========================================================================================================================
+
+========================================================================================================================
+ADR Directional Exhaustion (Layer 2) SWEEP (pre-filter, all 3 strategies)
+========================================================================================================================
+
+Running baselines...
+   vScalpA baseline: 472 trades, WR 84.5%, PF 1.289, $+1948
+   vScalpB baseline: 376 trades, WR 71.5%, PF 1.186, $+889
+    MES_V2 baseline: 540 trades, WR 56.1%, PF 1.332, $+4331
+
+=================================================================================================================================================
+              Config Strategy Split  Trades    WR%      PF       Net$     MaxDD  Sharpe  Blocked    dPF%         Verdict
+-------------------------------------------------------------------------------------------------------------------------------------------------
+                None  vScalpA    IS     235  84.3%   1.341   +1156.60   -404.24   1.734        0   +0.0%
+                None  vScalpA   OOS     237  84.8%   1.236    +791.52   -569.66   1.224        0   +0.0%            FAIL
+                None  vScalpB    IS     181  72.4%   1.252    +556.76   -358.32   1.444        0   +0.0%
+                None  vScalpB   OOS     195  70.8%   1.129    +332.20   -502.14   0.744        0   +0.0%            FAIL
+                None   MES_V2    IS     279  57.0%   1.367   +2591.25  -1168.75   1.865        0   +0.0%
+                None   MES_V2   OOS     261  55.2%   1.292   +1740.00   -672.50   1.522        0   +0.0%            FAIL
+        dir_lb5_t0.3  vScalpA    IS     172  84.9%   1.416    +997.62   -347.74   2.031       63   +5.6%
+        dir_lb5_t0.3  vScalpA   OOS     175  85.7%   1.388    +902.50   -397.10   1.897       62  +12.3%     STRONG PASS
+        dir_lb5_t0.3  vScalpB    IS     131  71.8%   1.216    +359.76   -324.08   1.241       50   -2.9%
+        dir_lb5_t0.3  vScalpB   OOS     126  75.4%   1.355    +514.46   -355.10   1.763       69  +20.0%            FAIL
+        dir_lb5_t0.3   MES_V2    IS     222  56.8%   1.395   +2331.25   -916.25   2.044       57   +2.0%
+        dir_lb5_t0.3   MES_V2   OOS     190  55.8%   1.256   +1133.75   -692.50   1.342       71   -2.8%   MARGINAL PASS
+        dir_lb5_t0.4  vScalpA    IS     195  83.6%   1.276    +806.70   -427.86   1.433       40   -4.8%
+        dir_lb5_t0.4  vScalpA   OOS     192  86.5%   1.453   +1099.32   -352.68   2.157       45  +17.6%   MARGINAL PASS
+        dir_lb5_t0.4  vScalpB    IS     143  72.7%   1.227    +401.28   -288.28   1.294       38   -2.0%
+        dir_lb5_t0.4  vScalpB   OOS     144  75.7%   1.402    +657.24   -354.34   1.997       51  +24.2%   MARGINAL PASS
+        dir_lb5_t0.4   MES_V2    IS     230  55.7%   1.306   +1908.75   -988.75   1.613       49   -4.5%
+        dir_lb5_t0.4   MES_V2   OOS     209  54.1%   1.169    +865.00   -798.75   0.931       52   -9.5%            FAIL
+        dir_lb5_t0.5  vScalpA    IS     211  84.8%   1.385   +1126.06   -353.72   1.908       24   +3.3%
+        dir_lb5_t0.5  vScalpA   OOS     202  86.6%   1.464   +1164.42   -340.24   2.196       35  +18.4%   MARGINAL PASS
+        dir_lb5_t0.5  vScalpB    IS     158  72.8%   1.300    +566.18   -288.28   1.674       23   +3.8%
+        dir_lb5_t0.5  vScalpB   OOS     158  75.3%   1.406    +734.18   -292.30   2.037       37  +24.5%   MARGINAL PASS
+        dir_lb5_t0.5   MES_V2    IS     241  56.8%   1.354   +2243.75  -1098.75   1.829       38   -1.0%
+        dir_lb5_t0.5   MES_V2   OOS     220  54.5%   1.180    +963.75   -750.00   0.987       41   -8.7%            FAIL
+        dir_lb5_t0.6  vScalpA    IS     219  84.5%   1.352   +1096.74   -419.34   1.776       16   +0.8%
+        dir_lb5_t0.6  vScalpA   OOS     215  87.4%   1.570   +1431.90   -340.24   2.600       22  +27.0%   MARGINAL PASS
+        dir_lb5_t0.6  vScalpB    IS     162  72.2%   1.258    +514.52   -288.28   1.468       19   +0.5%
+        dir_lb5_t0.6  vScalpB   OOS     164  75.6%   1.408    +753.94   -292.30   2.044       31  +24.7%   MARGINAL PASS
+        dir_lb5_t0.6   MES_V2    IS     254  57.9%   1.369   +2381.25  -1061.25   1.878       25   +0.1%
+        dir_lb5_t0.6   MES_V2   OOS     228  54.4%   1.227   +1216.25   -738.75   1.215       33   -5.0%            FAIL
+        dir_lb5_t0.7  vScalpA    IS     225  84.4%   1.348   +1113.00   -347.74   1.756       10   +0.5%
+        dir_lb5_t0.7  vScalpA   OOS     225  86.7%   1.456   +1273.50   -365.12   2.168       12  +17.8%   MARGINAL PASS
+        dir_lb5_t0.7  vScalpB    IS     167  73.1%   1.317    +622.82   -288.28   1.757       14   +5.2%
+        dir_lb5_t0.7  vScalpB   OOS     175  73.1%   1.296    +617.00   -284.52   1.574       20  +14.8%     STRONG PASS
+        dir_lb5_t0.7   MES_V2    IS     261  56.7%   1.343   +2301.25  -1303.75   1.767       18   -1.8%
+        dir_lb5_t0.7   MES_V2   OOS     241  55.6%   1.310   +1715.00   -648.75   1.613       20   +1.4%   MARGINAL PASS
+        dir_lb5_t0.8  vScalpA    IS     230  83.9%   1.293    +999.80   -349.66   1.519        5   -3.6%
+        dir_lb5_t0.8  vScalpA   OOS     230  87.0%   1.481   +1345.80   -327.70   2.260        7  +19.8%   MARGINAL PASS
+        dir_lb5_t0.8  vScalpB    IS     173  73.4%   1.313    +632.08   -288.28   1.734        8   +4.9%
+        dir_lb5_t0.8  vScalpB   OOS     177  72.9%   1.268    +572.92   -284.52   1.442       18  +12.3%   MARGINAL PASS
+        dir_lb5_t0.8   MES_V2    IS     265  56.2%   1.341   +2318.75  -1303.75   1.756       14   -1.9%
+        dir_lb5_t0.8   MES_V2   OOS     247  55.5%   1.294   +1667.50   -678.75   1.538       14   +0.2%   MARGINAL PASS
+       dir_lb10_t0.3  vScalpA    IS     178  85.4%   1.479   +1149.38   -347.74   2.291       57  +10.3%
+       dir_lb10_t0.3  vScalpA   OOS     170  85.9%   1.423    +939.20   -366.80   2.047       67  +15.1%     STRONG PASS
+       dir_lb10_t0.3  vScalpB    IS     132  70.5%   1.135    +237.72   -321.58   0.812       49   -9.3%
+       dir_lb10_t0.3  vScalpB   OOS     126  76.2%   1.396    +546.46   -318.68   1.916       69  +23.6%            FAIL
+       dir_lb10_t0.3   MES_V2    IS     222  55.9%   1.374   +2208.75   -756.25   1.941       57   +0.5%
+       dir_lb10_t0.3   MES_V2   OOS     196  55.6%   1.281   +1262.50   -581.25   1.468       65   -0.9%   MARGINAL PASS
+       dir_lb10_t0.4  vScalpA    IS     195  84.6%   1.384   +1051.70   -347.74   1.904       40   +3.2%
+       dir_lb10_t0.4  vScalpA   OOS     193  86.5%   1.468   +1134.28   -330.72   2.219       44  +18.8%   MARGINAL PASS
+       dir_lb10_t0.4  vScalpB    IS     147  71.4%   1.178    +338.12   -305.62   1.044       34   -5.9%
+       dir_lb10_t0.4  vScalpB   OOS     148  75.7%   1.395    +666.08   -338.88   1.955       47  +23.6%            FAIL
+       dir_lb10_t0.4   MES_V2    IS     238  55.9%   1.357   +2200.00   -982.50   1.853       41   -0.7%
+       dir_lb10_t0.4   MES_V2   OOS     208  53.8%   1.226   +1105.00   -726.25   1.218       53   -5.1%            FAIL
+       dir_lb10_t0.5  vScalpA    IS     210  84.3%   1.329    +994.60   -385.68   1.667       25   -0.9%
+       dir_lb10_t0.5  vScalpA   OOS     206  86.4%   1.419   +1094.76   -395.54   2.010       31  +14.8%   MARGINAL PASS
+       dir_lb10_t0.5  vScalpB    IS     161  72.0%   1.248    +493.56   -288.28   1.418       20   -0.3%
+       dir_lb10_t0.5  vScalpB   OOS     155  76.8%   1.481    +803.80   -292.30   2.309       40  +31.2%   MARGINAL PASS
+       dir_lb10_t0.5   MES_V2    IS     245  56.3%   1.361   +2268.75  -1037.50   1.866       34   -0.4%
+       dir_lb10_t0.5   MES_V2   OOS     220  54.1%   1.153    +830.00   -858.75   0.844       41  -10.8%            FAIL
+       dir_lb10_t0.6  vScalpA    IS     217  84.3%   1.343   +1069.32   -367.22   1.737       18   +0.1%
+       dir_lb10_t0.6  vScalpA   OOS     218  87.2%   1.524   +1372.28   -395.54   2.427       19  +23.3%   MARGINAL PASS
+       dir_lb10_t0.6  vScalpB    IS     163  71.8%   1.239    +483.98   -288.28   1.375       18   -1.0%
+       dir_lb10_t0.6  vScalpB   OOS     168  76.8%   1.501    +906.78   -280.02   2.423       27  +32.9%   MARGINAL PASS
+       dir_lb10_t0.6   MES_V2    IS     256  55.9%   1.294   +1991.25  -1303.75   1.550       23   -5.3%
+       dir_lb10_t0.6   MES_V2   OOS     228  54.4%   1.170    +946.25   -751.25   0.926       33   -9.4%            FAIL
+       dir_lb10_t0.7  vScalpA    IS     226  84.1%   1.306   +1010.46   -376.92   1.570        9   -2.6%
+       dir_lb10_t0.7  vScalpA   OOS     223  87.0%   1.488   +1323.58   -431.28   2.288       14  +20.4%   MARGINAL PASS
+       dir_lb10_t0.7  vScalpB    IS     169  72.8%   1.276    +558.74   -288.28   1.557       12   +1.9%
+       dir_lb10_t0.7  vScalpB   OOS     171  74.9%   1.338    +675.16   -370.08   1.740       24  +18.5%   MARGINAL PASS
+       dir_lb10_t0.7   MES_V2    IS     261  56.3%   1.317   +2140.00  -1232.50   1.645       18   -3.7%
+       dir_lb10_t0.7   MES_V2   OOS     238  55.5%   1.329   +1768.75   -618.75   1.692       23   +2.9%   MARGINAL PASS
+       dir_lb10_t0.8  vScalpA    IS     230  84.3%   1.324   +1071.80   -347.74   1.650        5   -1.3%
+       dir_lb10_t0.8  vScalpA   OOS     226  86.7%   1.449   +1256.96   -431.28   2.132       11  +17.2%   MARGINAL PASS
+       dir_lb10_t0.8  vScalpB    IS     173  72.8%   1.263    +544.58   -288.28   1.489        8   +0.9%
+       dir_lb10_t0.8  vScalpB   OOS     176  73.3%   1.242    +524.96   -370.08   1.309       19  +10.0%   MARGINAL PASS
+       dir_lb10_t0.8   MES_V2    IS     266  56.8%   1.337   +2286.25  -1232.50   1.738       13   -2.2%
+       dir_lb10_t0.8   MES_V2   OOS     245  55.1%   1.285   +1610.00   -672.50   1.499       16   -0.5%            FAIL
+       dir_lb14_t0.3  vScalpA    IS     180  85.6%   1.512   +1214.30   -347.74   2.425       55  +12.8%
+       dir_lb14_t0.3  vScalpA   OOS     173  86.1%   1.431    +957.58   -351.20   2.068       64  +15.8%     STRONG PASS
+       dir_lb14_t0.3  vScalpB    IS     137  72.3%   1.273    +473.52   -289.54   1.544       44   +1.7%
+       dir_lb14_t0.3  vScalpB   OOS     128  75.8%   1.375    +530.38   -318.68   1.836       67  +21.8%            FAIL
+       dir_lb14_t0.3   MES_V2    IS     222  55.0%   1.305   +1838.75   -950.00   1.625       57   -4.5%
+       dir_lb14_t0.3   MES_V2   OOS     193  53.9%   1.203    +927.50   -591.25   1.090       68   -6.9%            FAIL
+       dir_lb14_t0.4  vScalpA    IS     200  84.5%   1.358   +1012.50   -347.74   1.790       35   +1.3%
+       dir_lb14_t0.4  vScalpA   OOS     194  86.1%   1.445   +1104.74   -330.72   2.134       43  +16.9%   MARGINAL PASS
+       dir_lb14_t0.4  vScalpB    IS     150  71.3%   1.194    +378.00   -289.16   1.141       31   -4.6%
+       dir_lb14_t0.4  vScalpB   OOS     144  75.7%   1.387    +628.24   -329.88   1.906       51  +22.9%   MARGINAL PASS
+       dir_lb14_t0.4   MES_V2    IS     237  55.7%   1.342   +2100.00  -1023.75   1.776       42   -1.8%
+       dir_lb14_t0.4   MES_V2   OOS     210  55.2%   1.260   +1262.50   -758.75   1.377       51   -2.5%            FAIL
+       dir_lb14_t0.5  vScalpA    IS     211  84.4%   1.360   +1088.56   -405.64   1.801       24   +1.4%
+       dir_lb14_t0.5  vScalpA   OOS     206  86.4%   1.413   +1081.76   -395.54   1.984       31  +14.3%   MARGINAL PASS
+       dir_lb14_t0.5  vScalpB    IS     163  71.8%   1.245    +495.98   -288.28   1.407       18   -0.6%
+       dir_lb14_t0.5  vScalpB   OOS     157  77.1%   1.511    +853.22   -280.02   2.431       38  +33.8%   MARGINAL PASS
+       dir_lb14_t0.5   MES_V2    IS     246  56.5%   1.380   +2372.50  -1052.50   1.947       33   +1.0%
+       dir_lb14_t0.5   MES_V2   OOS     224  54.9%   1.202   +1088.75   -858.75   1.090       37   -7.0%            FAIL
+       dir_lb14_t0.6  vScalpA    IS     220  84.5%   1.366   +1139.70   -347.74   1.837       15   +1.9%
+       dir_lb14_t0.6  vScalpA   OOS     219  87.2%   1.527   +1379.24   -386.08   2.438       18  +23.5%   MARGINAL PASS
+       dir_lb14_t0.6  vScalpB    IS     164  72.0%   1.251    +506.94   -288.28   1.433       17   -0.1%
+       dir_lb14_t0.6  vScalpB   OOS     164  77.4%   1.559    +961.44   -280.02   2.636       31  +38.1%   MARGINAL PASS
+       dir_lb14_t0.6   MES_V2    IS     261  55.9%   1.379   +2491.25  -1240.00   1.939       18   +0.9%
+       dir_lb14_t0.6   MES_V2   OOS     234  54.3%   1.200   +1122.50   -716.25   1.078       27   -7.1%            FAIL
+       dir_lb14_t0.7  vScalpA    IS     230  83.9%   1.287    +978.80   -386.62   1.488        5   -4.0%
+       dir_lb14_t0.7  vScalpA   OOS     223  87.4%   1.559   +1464.58   -350.62   2.559       14  +26.1%   MARGINAL PASS
+       dir_lb14_t0.7  vScalpB    IS     173  72.8%   1.275    +570.08   -288.28   1.554        8   +1.8%
+       dir_lb14_t0.7  vScalpB   OOS     170  75.3%   1.385    +744.20   -280.02   1.954       25  +22.7%   MARGINAL PASS
+       dir_lb14_t0.7   MES_V2    IS     265  56.6%   1.340   +2295.00  -1168.75   1.756       14   -2.0%
+       dir_lb14_t0.7   MES_V2   OOS     238  55.5%   1.316   +1711.25   -618.75   1.639       23   +1.9%   MARGINAL PASS
+       dir_lb14_t0.8  vScalpA    IS     231  84.4%   1.331   +1095.26   -347.74   1.682        4   -0.7%
+       dir_lb14_t0.8  vScalpA   OOS     229  86.0%   1.373   +1107.84   -479.08   1.828        8  +11.1%   MARGINAL PASS
+       dir_lb14_t0.8  vScalpB    IS     176  73.3%   1.311    +643.46   -288.28   1.733        5   +4.7%
+       dir_lb14_t0.8  vScalpB   OOS     175  73.7%   1.283    +595.50   -370.08   1.502       20  +13.6%   MARGINAL PASS
+       dir_lb14_t0.8   MES_V2    IS     267  56.6%   1.340   +2311.25  -1168.75   1.752       12   -2.0%
+       dir_lb14_t0.8   MES_V2   OOS     245  55.9%   1.310   +1727.50   -612.50   1.608       16   +1.4%   MARGINAL PASS
+       dir_lb20_t0.3  vScalpA    IS     188  86.2%   1.545   +1301.98   -304.40   2.532       47  +15.2%
+       dir_lb20_t0.3  vScalpA   OOS     172  85.5%   1.321    +745.62   -351.20   1.601       65   +6.9%     STRONG PASS
+       dir_lb20_t0.3  vScalpB    IS     141  74.5%   1.421    +690.86   -244.40   2.246       40  +13.5%
+       dir_lb20_t0.3  vScalpB   OOS     126  76.2%   1.387    +540.46   -385.18   1.883       69  +22.9%            FAIL
+       dir_lb20_t0.3   MES_V2    IS     225  55.6%   1.353   +2082.50  -1063.75   1.840       54   -1.0%
+       dir_lb20_t0.3   MES_V2   OOS     194  53.1%   1.175    +801.25   -625.00   0.945       67   -9.1%            FAIL
+       dir_lb20_t0.4  vScalpA    IS     207  84.1%   1.287    +873.72   -347.74   1.477       28   -4.0%
+       dir_lb20_t0.4  vScalpA   OOS     194  86.6%   1.471   +1131.74   -352.68   2.223       43  +19.0%   MARGINAL PASS
+       dir_lb20_t0.4  vScalpB    IS     157  73.2%   1.317    +600.22   -251.40   1.764       24   +5.2%
+       dir_lb20_t0.4  vScalpB   OOS     141  76.6%   1.446    +664.36   -372.76   2.144       54  +28.1%     STRONG PASS
+       dir_lb20_t0.4   MES_V2    IS     238  54.6%   1.278   +1785.00  -1340.00   1.491       41   -6.5%
+       dir_lb20_t0.4   MES_V2   OOS     211  55.9%   1.291   +1408.75   -731.25   1.528       50   -0.1%            FAIL
+       dir_lb20_t0.5  vScalpA    IS     216  84.3%   1.348   +1090.36   -405.64   1.754       19   +0.5%
+       dir_lb20_t0.5  vScalpA   OOS     207  86.5%   1.440   +1153.22   -395.54   2.104       30  +16.5%   MARGINAL PASS
+       dir_lb20_t0.5  vScalpB    IS     165  72.1%   1.265    +535.40   -288.28   1.507       16   +1.0%
+       dir_lb20_t0.5  vScalpB   OOS     156  76.3%   1.471    +804.26   -294.92   2.284       39  +30.3%   MARGINAL PASS
+       dir_lb20_t0.5   MES_V2    IS     251  57.4%   1.393   +2488.75  -1168.75   2.000       28   +1.9%
+       dir_lb20_t0.5   MES_V2   OOS     223  55.6%   1.240   +1257.50   -673.75   1.277       38   -4.0%   MARGINAL PASS
+       dir_lb20_t0.6  vScalpA    IS     222  84.2%   1.324   +1043.12   -348.76   1.651       13   -1.3%
+       dir_lb20_t0.6  vScalpA   OOS     220  86.8%   1.450   +1218.20   -386.08   2.130       17  +17.3%   MARGINAL PASS
+       dir_lb20_t0.6  vScalpB    IS     167  72.5%   1.277    +560.32   -288.28   1.567       14   +2.0%
+       dir_lb20_t0.6  vScalpB   OOS     165  77.6%   1.568    +970.90   -280.02   2.665       30  +38.9%   MARGINAL PASS
+       dir_lb20_t0.6   MES_V2    IS     260  56.5%   1.377   +2455.00  -1168.75   1.928       19   +0.7%
+       dir_lb20_t0.6   MES_V2   OOS     231  54.5%   1.221   +1216.25   -822.50   1.187       30   -5.5%            FAIL
+       dir_lb20_t0.7  vScalpA    IS     229  83.8%   1.286    +970.34   -393.88   1.482        6   -4.1%
+       dir_lb20_t0.7  vScalpA   OOS     227  86.8%   1.472   +1320.42   -350.62   2.232       10  +19.1%   MARGINAL PASS
+       dir_lb20_t0.7  vScalpB    IS     173  72.8%   1.275    +570.08   -288.28   1.554        8   +1.8%
+       dir_lb20_t0.7  vScalpB   OOS     172  75.0%   1.367    +720.62   -280.02   1.875       23  +21.1%   MARGINAL PASS
+       dir_lb20_t0.7   MES_V2    IS     264  56.8%   1.394   +2578.75  -1168.75   1.999       15   +2.0%
+       dir_lb20_t0.7   MES_V2   OOS     240  55.0%   1.266   +1506.25   -618.75   1.405       21   -2.0%   MARGINAL PASS
+       dir_lb20_t0.8  vScalpA    IS     231  84.0%   1.299   +1012.76   -433.20   1.542        4   -3.1%
+       dir_lb20_t0.8  vScalpA   OOS     230  86.1%   1.376   +1116.80   -470.12   1.839        7  +11.3%   MARGINAL PASS
+       dir_lb20_t0.8  vScalpB    IS     175  73.1%   1.299    +619.50   -288.28   1.675        6   +3.8%
+       dir_lb20_t0.8  vScalpB   OOS     179  73.7%   1.269    +578.34   -361.12   1.432       16  +12.4%   MARGINAL PASS
+       dir_lb20_t0.8   MES_V2    IS     268  56.3%   1.354   +2406.25  -1168.75   1.824       11   -1.0%
+       dir_lb20_t0.8   MES_V2   OOS     247  55.9%   1.290   +1663.75   -618.75   1.517       14   -0.2%            FAIL
+
+====================================================================================================
+PORTFOLIO AGGREGATE (sum across strategies)
+====================================================================================================
+              Config    IS_Net$   OOS_Net$  IS_Sharpe OOS_Sharpe         Verdict
+----------------------------------------------------------------------------------------------------
+                None   +4304.61   +2863.72      1.662      1.232        baseline
+        dir_lb5_t0.3   +3688.63   +2550.71      1.809      1.521
+        dir_lb5_t0.4   +3116.73   +2621.56      1.427      1.422
+        dir_lb5_t0.5   +3935.99   +2862.35      1.715      1.469
+        dir_lb5_t0.6   +3992.51   +3402.09      1.685      1.695
+        dir_lb5_t0.7   +4037.07   +3605.50      1.661      1.689
+        dir_lb5_t0.8   +3950.63   +3586.22      1.590      1.653
+       dir_lb10_t0.3   +3595.85   +2748.16      1.752      1.647
+       dir_lb10_t0.4   +3589.82   +2905.36      1.644      1.588
+       dir_lb10_t0.5   +3756.91   +2728.56      1.642      1.391
+       dir_lb10_t0.6   +3544.55   +3225.31      1.485      1.569
+       dir_lb10_t0.7   +3709.20   +3767.49      1.519      1.794
+       dir_lb10_t0.8   +3902.63   +3391.92      1.580      1.575
+       dir_lb14_t0.3   +3526.57   +2415.46      1.714      1.447
+       dir_lb14_t0.4   +3490.50   +2995.48      1.586      1.633
+       dir_lb14_t0.5   +3957.04   +3023.73      1.719      1.527
+       dir_lb14_t0.6   +4137.89   +3463.18      1.731      1.677
+       dir_lb14_t0.7   +3843.88   +3920.03      1.558      1.878
+       dir_lb14_t0.8   +4049.97   +3430.84      1.631      1.585
+       dir_lb20_t0.3   +4075.34   +2087.33      1.963      1.255
+       dir_lb20_t0.4   +3258.94   +3204.85      1.444      1.764
+       dir_lb20_t0.5   +4114.51   +3214.98      1.750      1.636
+       dir_lb20_t0.6   +4058.44   +3405.35      1.696      1.659
+       dir_lb20_t0.7   +4119.17   +3547.29      1.685      1.655
+       dir_lb20_t0.8   +4038.51   +3358.89      1.626      1.526
+
+================================================================================
+PER-STRATEGY VERDICTS
+================================================================================
+
+  dir_lb5_t0.3:
+     vScalpA: STRONG PASS (IS PF +5.6%, OOS PF +12.3%)
+     vScalpB: FAIL (trade count too low (IS 72%, OOS 65%))
+      MES_V2: MARGINAL PASS (IS PF +2.0%, OOS PF -2.8%)
+
+  dir_lb5_t0.4:
+     vScalpA: MARGINAL PASS (IS PF -4.8%, OOS PF +17.6%)
+     vScalpB: MARGINAL PASS (IS PF -2.0%, OOS PF +24.2%)
+      MES_V2: FAIL (PF degrades (IS -4.5%, OOS -9.5%))
+
+  dir_lb5_t0.5:
+     vScalpA: MARGINAL PASS (IS PF +3.3%, OOS PF +18.4%)
+     vScalpB: MARGINAL PASS (IS PF +3.8%, OOS PF +24.5%)
+      MES_V2: FAIL (PF degrades (IS -1.0%, OOS -8.7%))
+
+  dir_lb5_t0.6:
+     vScalpA: MARGINAL PASS (IS PF +0.8%, OOS PF +27.0%)
+     vScalpB: MARGINAL PASS (IS PF +0.5%, OOS PF +24.7%)
+      MES_V2: FAIL (PF degrades (IS +0.1%, OOS -5.0%))
+
+  dir_lb5_t0.7: <<<
+     vScalpA: MARGINAL PASS (IS PF +0.5%, OOS PF +17.8%)
+     vScalpB: STRONG PASS (IS PF +5.2%, OOS PF +14.8%)
+      MES_V2: MARGINAL PASS (IS PF -1.8%, OOS PF +1.4%)
+
+  dir_lb5_t0.8: <<<
+     vScalpA: MARGINAL PASS (IS PF -3.6%, OOS PF +19.8%)
+     vScalpB: MARGINAL PASS (IS PF +4.9%, OOS PF +12.3%)
+      MES_V2: MARGINAL PASS (IS PF -1.9%, OOS PF +0.2%)
+
+  dir_lb10_t0.3:
+     vScalpA: STRONG PASS (IS PF +10.3%, OOS PF +15.1%)
+     vScalpB: FAIL (trade count too low (IS 73%, OOS 65%))
+      MES_V2: MARGINAL PASS (IS PF +0.5%, OOS PF -0.9%)
+
+  dir_lb10_t0.4:
+     vScalpA: MARGINAL PASS (IS PF +3.2%, OOS PF +18.8%)
+     vScalpB: FAIL (PF degrades (IS -5.9%, OOS +23.6%))
+      MES_V2: FAIL (PF degrades (IS -0.7%, OOS -5.1%))
+
+  dir_lb10_t0.5:
+     vScalpA: MARGINAL PASS (IS PF -0.9%, OOS PF +14.8%)
+     vScalpB: MARGINAL PASS (IS PF -0.3%, OOS PF +31.2%)
+      MES_V2: FAIL (PF degrades (IS -0.4%, OOS -10.8%))
+
+  dir_lb10_t0.6:
+     vScalpA: MARGINAL PASS (IS PF +0.1%, OOS PF +23.3%)
+     vScalpB: MARGINAL PASS (IS PF -1.0%, OOS PF +32.9%)
+      MES_V2: FAIL (PF degrades (IS -5.3%, OOS -9.4%))
+
+  dir_lb10_t0.7: <<<
+     vScalpA: MARGINAL PASS (IS PF -2.6%, OOS PF +20.4%)
+     vScalpB: MARGINAL PASS (IS PF +1.9%, OOS PF +18.5%)
+      MES_V2: MARGINAL PASS (IS PF -3.7%, OOS PF +2.9%)
+
+  dir_lb10_t0.8:
+     vScalpA: MARGINAL PASS (IS PF -1.3%, OOS PF +17.2%)
+     vScalpB: MARGINAL PASS (IS PF +0.9%, OOS PF +10.0%)
+      MES_V2: FAIL (no improvement (IS PF -2.2%, OOS PF -0.5%))
+
+  dir_lb14_t0.3:
+     vScalpA: STRONG PASS (IS PF +12.8%, OOS PF +15.8%)
+     vScalpB: FAIL (trade count too low (IS 76%, OOS 66%))
+      MES_V2: FAIL (PF degrades (IS -4.5%, OOS -6.9%))
+
+  dir_lb14_t0.4:
+     vScalpA: MARGINAL PASS (IS PF +1.3%, OOS PF +16.9%)
+     vScalpB: MARGINAL PASS (IS PF -4.6%, OOS PF +22.9%)
+      MES_V2: FAIL (no improvement (IS PF -1.8%, OOS PF -2.5%))
+
+  dir_lb14_t0.5:
+     vScalpA: MARGINAL PASS (IS PF +1.4%, OOS PF +14.3%)
+     vScalpB: MARGINAL PASS (IS PF -0.6%, OOS PF +33.8%)
+      MES_V2: FAIL (PF degrades (IS +1.0%, OOS -7.0%))
+
+  dir_lb14_t0.6:
+     vScalpA: MARGINAL PASS (IS PF +1.9%, OOS PF +23.5%)
+     vScalpB: MARGINAL PASS (IS PF -0.1%, OOS PF +38.1%)
+      MES_V2: FAIL (PF degrades (IS +0.9%, OOS -7.1%))
+
+  dir_lb14_t0.7: <<<
+     vScalpA: MARGINAL PASS (IS PF -4.0%, OOS PF +26.1%)
+     vScalpB: MARGINAL PASS (IS PF +1.8%, OOS PF +22.7%)
+      MES_V2: MARGINAL PASS (IS PF -2.0%, OOS PF +1.9%)
+
+  dir_lb14_t0.8: <<<
+     vScalpA: MARGINAL PASS (IS PF -0.7%, OOS PF +11.1%)
+     vScalpB: MARGINAL PASS (IS PF +4.7%, OOS PF +13.6%)
+      MES_V2: MARGINAL PASS (IS PF -2.0%, OOS PF +1.4%)
+
+  dir_lb20_t0.3:
+     vScalpA: STRONG PASS (IS PF +15.2%, OOS PF +6.9%)
+     vScalpB: FAIL (trade count too low (IS 78%, OOS 65%))
+      MES_V2: FAIL (PF degrades (IS -1.0%, OOS -9.1%))
+
+  dir_lb20_t0.4:
+     vScalpA: MARGINAL PASS (IS PF -4.0%, OOS PF +19.0%)
+     vScalpB: STRONG PASS (IS PF +5.2%, OOS PF +28.1%)
+      MES_V2: FAIL (PF degrades (IS -6.5%, OOS -0.1%))
+
+  dir_lb20_t0.5: <<<
+     vScalpA: MARGINAL PASS (IS PF +0.5%, OOS PF +16.5%)
+     vScalpB: MARGINAL PASS (IS PF +1.0%, OOS PF +30.3%)
+      MES_V2: MARGINAL PASS (IS PF +1.9%, OOS PF -4.0%)
+
+  dir_lb20_t0.6:
+     vScalpA: MARGINAL PASS (IS PF -1.3%, OOS PF +17.3%)
+     vScalpB: MARGINAL PASS (IS PF +2.0%, OOS PF +38.9%)
+      MES_V2: FAIL (PF degrades (IS +0.7%, OOS -5.5%))
+
+  dir_lb20_t0.7: <<<
+     vScalpA: MARGINAL PASS (IS PF -4.1%, OOS PF +19.1%)
+     vScalpB: MARGINAL PASS (IS PF +1.8%, OOS PF +21.1%)
+      MES_V2: MARGINAL PASS (IS PF +2.0%, OOS PF -2.0%)
+
+  dir_lb20_t0.8:
+     vScalpA: MARGINAL PASS (IS PF -3.1%, OOS PF +11.3%)
+     vScalpB: MARGINAL PASS (IS PF +3.8%, OOS PF +12.4%)
+      MES_V2: FAIL (no improvement (IS PF -1.0%, OOS PF -0.2%))
+
+Best Layer 1 configs for Layer 3: ['rng_lb20_t1.0', 'rng_lb14_t1.1', 'rng_lb14_t0.9']
+Best Layer 2 configs for Layer 3: ['dir_lb14_t0.7', 'dir_lb10_t0.7', 'dir_lb5_t0.7']
+
+========================================================================================================================
+LAYER 3: Combined Range + Directional Gate
+========================================================================================================================
+
+========================================================================================================================
+ADR Combined (Layer 3) SWEEP (pre-filter, all 3 strategies)
+========================================================================================================================
+
+Running baselines...
+   vScalpA baseline: 472 trades, WR 84.5%, PF 1.289, $+1948
+   vScalpB baseline: 376 trades, WR 71.5%, PF 1.186, $+889
+    MES_V2 baseline: 540 trades, WR 56.1%, PF 1.332, $+4331
+
+=================================================================================================================================================
+              Config Strategy Split  Trades    WR%      PF       Net$     MaxDD  Sharpe  Blocked    dPF%         Verdict
+-------------------------------------------------------------------------------------------------------------------------------------------------
+                None  vScalpA    IS     235  84.3%   1.341   +1156.60   -404.24   1.734        0   +0.0%
+                None  vScalpA   OOS     237  84.8%   1.236    +791.52   -569.66   1.224        0   +0.0%            FAIL
+                None  vScalpB    IS     181  72.4%   1.252    +556.76   -358.32   1.444        0   +0.0%
+                None  vScalpB   OOS     195  70.8%   1.129    +332.20   -502.14   0.744        0   +0.0%            FAIL
+                None   MES_V2    IS     279  57.0%   1.367   +2591.25  -1168.75   1.865        0   +0.0%
+                None   MES_V2   OOS     261  55.2%   1.292   +1740.00   -672.50   1.522        0   +0.0%            FAIL
+ comb_lb20_r1.0_d0.7  vScalpA    IS     230  83.9%   1.292    +992.80   -393.88   1.512        5   -3.7%
+ comb_lb20_r1.0_d0.7  vScalpA   OOS     228  86.8%   1.475   +1329.38   -350.62   2.242        9  +19.3%   MARGINAL PASS
+ comb_lb20_r1.0_d0.7  vScalpB    IS     173  72.8%   1.275    +570.08   -288.28   1.554        8   +1.8%
+ comb_lb20_r1.0_d0.7  vScalpB   OOS     175  73.7%   1.303    +625.00   -280.02   1.598       20  +15.4%   MARGINAL PASS
+ comb_lb20_r1.0_d0.7   MES_V2    IS     265  56.2%   1.384   +2530.00  -1168.75   1.956       14   +1.2%
+ comb_lb20_r1.0_d0.7   MES_V2   OOS     245  55.5%   1.293   +1663.75   -618.75   1.530       16   +0.1%   MARGINAL PASS
+ comb_lb20_r1.0_d0.7  vScalpA    IS     230  83.9%   1.292    +992.80   -393.88   1.512        5   -3.7%
+ comb_lb20_r1.0_d0.7  vScalpA   OOS     228  86.8%   1.475   +1329.38   -350.62   2.242        9  +19.3%   MARGINAL PASS
+ comb_lb20_r1.0_d0.7  vScalpB    IS     173  72.8%   1.275    +570.08   -288.28   1.554        8   +1.8%
+ comb_lb20_r1.0_d0.7  vScalpB   OOS     175  73.7%   1.303    +625.00   -280.02   1.598       20  +15.4%   MARGINAL PASS
+ comb_lb20_r1.0_d0.7   MES_V2    IS     265  56.2%   1.384   +2530.00  -1168.75   1.956       14   +1.2%
+ comb_lb20_r1.0_d0.7   MES_V2   OOS     245  55.5%   1.293   +1663.75   -618.75   1.530       16   +0.1%   MARGINAL PASS
+ comb_lb14_r1.1_d0.7  vScalpA    IS     231  84.0%   1.289    +983.26   -404.62   1.492        4   -3.9%
+ comb_lb14_r1.1_d0.7  vScalpA   OOS     228  85.5%   1.315    +967.88   -530.82   1.577        9   +6.4%   MARGINAL PASS
+ comb_lb14_r1.1_d0.7  vScalpB    IS     173  72.8%   1.275    +570.08   -288.28   1.554        8   +1.8%
+ comb_lb14_r1.1_d0.7  vScalpB   OOS     173  74.0%   1.275    +573.08   -370.08   1.456       22  +12.9%   MARGINAL PASS
+ comb_lb14_r1.1_d0.7   MES_V2    IS     266  56.0%   1.331   +2246.25  -1168.75   1.715       13   -2.6%
+ comb_lb14_r1.1_d0.7   MES_V2   OOS     245  55.5%   1.318   +1757.50   -672.50   1.647       16   +2.0%   MARGINAL PASS
+ comb_lb14_r1.1_d0.7  vScalpA    IS     231  84.0%   1.289    +983.26   -404.62   1.492        4   -3.9%
+ comb_lb14_r1.1_d0.7  vScalpA   OOS     228  85.5%   1.315    +967.88   -530.82   1.577        9   +6.4%   MARGINAL PASS
+ comb_lb14_r1.1_d0.7  vScalpB    IS     173  72.8%   1.275    +570.08   -288.28   1.554        8   +1.8%
+ comb_lb14_r1.1_d0.7  vScalpB   OOS     173  74.0%   1.275    +573.08   -370.08   1.456       22  +12.9%   MARGINAL PASS
+ comb_lb14_r1.1_d0.7   MES_V2    IS     266  56.0%   1.331   +2246.25  -1168.75   1.715       13   -2.6%
+ comb_lb14_r1.1_d0.7   MES_V2   OOS     245  55.5%   1.318   +1757.50   -672.50   1.647       16   +2.0%   MARGINAL PASS
+
+====================================================================================================
+PORTFOLIO AGGREGATE (sum across strategies)
+====================================================================================================
+              Config    IS_Net$   OOS_Net$  IS_Sharpe OOS_Sharpe         Verdict
+----------------------------------------------------------------------------------------------------
+                None   +4304.61   +2863.72      1.662      1.232        baseline
+ comb_lb20_r1.0_d0.7   +4092.88   +3618.13      1.671      1.670
+ comb_lb14_r1.1_d0.7   +3799.59   +3298.46      1.537      1.529
+
+================================================================================
+PER-STRATEGY VERDICTS
+================================================================================
+
+  comb_lb20_r1.0_d0.7: <<<
+     vScalpA: MARGINAL PASS (IS PF -3.7%, OOS PF +19.3%)
+     vScalpB: MARGINAL PASS (IS PF +1.8%, OOS PF +15.4%)
+      MES_V2: MARGINAL PASS (IS PF +1.2%, OOS PF +0.1%)
+
+  comb_lb20_r1.0_d0.7: <<<
+     vScalpA: MARGINAL PASS (IS PF -3.7%, OOS PF +19.3%)
+     vScalpB: MARGINAL PASS (IS PF +1.8%, OOS PF +15.4%)
+      MES_V2: MARGINAL PASS (IS PF +1.2%, OOS PF +0.1%)
+
+  comb_lb14_r1.1_d0.7: <<<
+     vScalpA: MARGINAL PASS (IS PF -3.9%, OOS PF +6.4%)
+     vScalpB: MARGINAL PASS (IS PF +1.8%, OOS PF +12.9%)
+      MES_V2: MARGINAL PASS (IS PF -2.6%, OOS PF +2.0%)
+
+  comb_lb14_r1.1_d0.7: <<<
+     vScalpA: MARGINAL PASS (IS PF -3.9%, OOS PF +6.4%)
+     vScalpB: MARGINAL PASS (IS PF +1.8%, OOS PF +12.9%)
+      MES_V2: MARGINAL PASS (IS PF -2.6%, OOS PF +2.0%)
+
+========================================================================================================================
+LAYER 4: Remaining Range Gate — block when ADR - today_range < TP
+========================================================================================================================
+
+========================================================================================================================
+ADR Remaining Range (Layer 4) SWEEP (pre-filter, all 3 strategies)
+========================================================================================================================
+
+Running baselines...
+   vScalpA baseline: 472 trades, WR 84.5%, PF 1.289, $+1948
+   vScalpB baseline: 376 trades, WR 71.5%, PF 1.186, $+889
+    MES_V2 baseline: 540 trades, WR 56.1%, PF 1.332, $+4331
+
+=================================================================================================================================================
+              Config Strategy Split  Trades    WR%      PF       Net$     MaxDD  Sharpe  Blocked    dPF%         Verdict
+-------------------------------------------------------------------------------------------------------------------------------------------------
+                None  vScalpA    IS     235  84.3%   1.341   +1156.60   -404.24   1.734        0   +0.0%
+                None  vScalpA   OOS     237  84.8%   1.236    +791.52   -569.66   1.224        0   +0.0%            FAIL
+                None  vScalpB    IS     181  72.4%   1.252    +556.76   -358.32   1.444        0   +0.0%
+                None  vScalpB   OOS     195  70.8%   1.129    +332.20   -502.14   0.744        0   +0.0%            FAIL
+                None   MES_V2    IS     279  57.0%   1.367   +2591.25  -1168.75   1.865        0   +0.0%
+                None   MES_V2   OOS     261  55.2%   1.292   +1740.00   -672.50   1.522        0   +0.0%            FAIL
+          remain_lb5  vScalpA    IS     219  84.5%   1.346   +1084.74   -347.74   1.745       16   +0.4%
+          remain_lb5  vScalpA   OOS     210  85.7%   1.355    +994.10   -408.00   1.757       27   +9.6%   MARGINAL PASS
+          remain_lb5  vScalpB    IS     149  72.5%   1.223    +405.54   -427.00   1.272       32   -2.3%
+          remain_lb5  vScalpB   OOS     138  73.9%   1.276    +415.98   -211.92   1.628       57  +13.0%   MARGINAL PASS
+          remain_lb5   MES_V2    IS     165  58.2%   1.411   +1957.50   -982.50   2.162      114   +3.2%
+          remain_lb5   MES_V2   OOS     129  59.7%   1.239    +802.50   -568.75   1.314      132   -4.1%            FAIL
+         remain_lb10  vScalpA    IS     216  84.7%   1.379   +1156.86   -347.74   1.891       19   +2.8%
+         remain_lb10  vScalpA   OOS     210  85.7%   1.347    +969.60   -530.82   1.717       27   +9.0%   MARGINAL PASS
+         remain_lb10  vScalpB    IS     148  70.9%   1.102    +196.08   -433.50   0.617       33  -12.0%
+         remain_lb10  vScalpB   OOS     141  74.5%   1.324    +504.36   -195.32   1.844       54  +17.3%            FAIL
+         remain_lb10   MES_V2    IS     173  56.1%   1.325   +1565.00   -858.75   1.729      106   -3.1%
+         remain_lb10   MES_V2   OOS     136  55.9%   1.134    +462.50   -576.25   0.753      125  -12.2%            FAIL
+         remain_lb14  vScalpA    IS     217  84.3%   1.334   +1048.82   -347.74   1.696       18   -0.5%
+         remain_lb14  vScalpA   OOS     210  85.7%   1.349    +972.10   -408.00   1.724       27   +9.1%   MARGINAL PASS
+         remain_lb14  vScalpB    IS     153  70.6%   1.124    +248.38   -433.50   0.745       28  -10.2%
+         remain_lb14  vScalpB   OOS     140  77.1%   1.540    +729.90   -120.12   2.845       55  +36.4%            FAIL
+         remain_lb14   MES_V2    IS     183  53.6%   1.235   +1248.75  -1311.25   1.307       96   -9.7%
+         remain_lb14   MES_V2   OOS     137  54.7%   1.042    +147.50   -640.00   0.242      124  -19.3%            FAIL
+         remain_lb20  vScalpA    IS     218  84.4%   1.334   +1049.78   -347.74   1.695       17   -0.5%
+         remain_lb20  vScalpA   OOS     209  85.6%   1.336    +939.14   -408.00   1.667       28   +8.1%   MARGINAL PASS
+         remain_lb20  vScalpB    IS     158  71.5%   1.176    +351.68   -385.04   1.029       23   -6.1%
+         remain_lb20  vScalpB   OOS     149  75.8%   1.443    +665.54   -147.66   2.428       46  +27.8%            FAIL
+         remain_lb20   MES_V2    IS     194  55.7%   1.371   +1965.00  -1168.75   1.953       85   +0.3%
+         remain_lb20   MES_V2   OOS     142  52.8%   1.037    +131.25   -713.75   0.211      119  -19.7%            FAIL
+
+====================================================================================================
+PORTFOLIO AGGREGATE (sum across strategies)
+====================================================================================================
+              Config    IS_Net$   OOS_Net$  IS_Sharpe OOS_Sharpe         Verdict
+----------------------------------------------------------------------------------------------------
+                None   +4304.61   +2863.72      1.662      1.232        baseline
+          remain_lb5   +3447.78   +2212.58      1.731      1.448
+         remain_lb10   +2917.94   +1936.46      1.487      1.263
+         remain_lb14   +2545.95   +1849.50      1.251      1.222
+         remain_lb20   +3366.46   +1735.93      1.603      1.127
+
+================================================================================
+PER-STRATEGY VERDICTS
+================================================================================
+
+  remain_lb5:
+     vScalpA: MARGINAL PASS (IS PF +0.4%, OOS PF +9.6%)
+     vScalpB: MARGINAL PASS (IS PF -2.3%, OOS PF +13.0%)
+      MES_V2: FAIL (trade count too low (IS 59%, OOS 49%))
+
+  remain_lb10:
+     vScalpA: MARGINAL PASS (IS PF +2.8%, OOS PF +9.0%)
+     vScalpB: FAIL (PF degrades (IS -12.0%, OOS +17.3%))
+      MES_V2: FAIL (trade count too low (IS 62%, OOS 52%))
+
+  remain_lb14:
+     vScalpA: MARGINAL PASS (IS PF -0.5%, OOS PF +9.1%)
+     vScalpB: FAIL (PF degrades (IS -10.2%, OOS +36.4%))
+      MES_V2: FAIL (trade count too low (IS 66%, OOS 52%))
+
+  remain_lb20:
+     vScalpA: MARGINAL PASS (IS PF -0.5%, OOS PF +8.1%)
+     vScalpB: FAIL (PF degrades (IS -6.1%, OOS +27.8%))
+      MES_V2: FAIL (trade count too low (IS 70%, OOS 54%))
+
+========================================================================================================================
+ALL LAYERS COMPLETE
+========================================================================================================================
