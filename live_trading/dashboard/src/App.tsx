@@ -87,7 +87,7 @@ function App() {
       {/* Safety controls panel */}
       {safetyStatus && (
         <div style={{ marginBottom: 16 }}>
-          <SafetyPanel safety={safetyStatus} positions={positions} sendCommand={sendCommand} />
+          <SafetyPanel safety={safetyStatus} positions={positions} sendCommand={sendCommand} instrumentsData={status?.instruments || {}} />
         </div>
       )}
 
@@ -100,6 +100,7 @@ function App() {
           instrument={selectedInstrument}
           safetyStatus={safetyStatus}
           blockedSignals={blockedSignals}
+          instrumentsData={status?.instruments || {}}
         />
       </div>
 

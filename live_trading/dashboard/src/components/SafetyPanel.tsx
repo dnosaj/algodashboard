@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import type { SafetyStatusData, Position } from '../types';
+import type { SafetyStatusData, Position, InstrumentData } from '../types';
 
 const FONT = "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace";
 
@@ -7,6 +7,7 @@ interface SafetyPanelProps {
   safety: SafetyStatusData;
   positions: Position[];
   sendCommand: (command: string, payload?: Record<string, unknown>) => void;
+  instrumentsData: Record<string, InstrumentData>;
 }
 
 function DrawdownBadge({ mode }: { mode: string }) {
@@ -85,7 +86,7 @@ function SizingInput({ label, value, min = 1, max = 99, onChange }: {
   );
 }
 
-export function SafetyPanel({ safety, positions, sendCommand }: SafetyPanelProps) {
+export function SafetyPanel({ safety, positions, sendCommand, instrumentsData }: SafetyPanelProps) {
   const strategies = Object.values(safety.strategies || {});
   const isHaltedOrPaused = safety.halted || safety.extended_pause;
   const [closingStrategy, setClosingStrategy] = useState<string | null>(null);
@@ -251,6 +252,48 @@ export function SafetyPanel({ safety, positions, sendCommand }: SafetyPanelProps
             ) : (
               <PausedBadge paused={false} />
             )}
+
+            {/* Structure exit badge (clickable toggle) */}
+            {instrumentsData[s.strategy_id]?.structure_exit_type && (() => {
+              const instData = instrumentsData[s.strategy_id];
+              const isEnabled = instData.structure_exit_enabled !== false;
+              const posSide = getPositionSide(s.strategy_id);
+              const isRunner = positions.find(
+                (p) => p.strategy_id === s.strategy_id && p.partial_filled
+              );
+              let levelLabel = '--';
+              let distLabel = '';
+              if (isRunner && posSide === 'LONG' && instData.structure_swing_high != null) {
+                levelLabel = instData.structure_swing_high.toFixed(0);
+                const dist = instData.structure_swing_high - instData.last_price;
+                distLabel = ` (${dist >= 0 ? '+' : ''}${dist.toFixed(0)})`;
+              } else if (isRunner && posSide === 'SHORT' && instData.structure_swing_low != null) {
+                levelLabel = instData.structure_swing_low.toFixed(0);
+                const dist = instData.last_price - instData.structure_swing_low;
+                distLabel = ` (${dist >= 0 ? '+' : ''}${dist.toFixed(0)})`;
+              }
+              const hasLevel = isEnabled && levelLabel !== '--';
+              return (
+                <span
+                  onClick={() => sendCommand('structure_exit_toggle', {
+                    strategy_id: s.strategy_id,
+                    enabled: !isEnabled,
+                  })}
+                  style={{
+                    fontSize: 10, fontWeight: 600, fontFamily: FONT,
+                    padding: '2px 6px', borderRadius: 3,
+                    backgroundColor: isEnabled
+                      ? (hasLevel ? 'rgba(0,204,102,0.12)' : 'rgba(0,204,102,0.08)')
+                      : 'rgba(102,102,102,0.12)',
+                    color: isEnabled ? '#00cc66' : '#666',
+                    cursor: 'pointer',
+                    opacity: isEnabled ? 1 : 0.6,
+                  }}
+                >
+                  STRUCT {isEnabled ? `${levelLabel}${distLabel}` : 'OFF'}
+                </span>
+              );
+            })()}
 
             {/* Pause/Resume button */}
             <button

@@ -32,6 +32,7 @@ class ExitReason(Enum):
     TAKE_PROFIT_PARTIAL = "TP1"
     TRAIL_STOP = "TRAIL"
     BE_TIME = "BE_TIME"
+    STRUCTURE = "STRUCTURE"
     EOD = "EOD"
     KILL_SWITCH = "KILL"
     MANUAL = "MANUAL"
@@ -98,6 +99,9 @@ class TradeRecord:
     gate_atr_value: Optional[float] = None
     gate_adr_ratio: Optional[float] = None
     gate_leledc_count: Optional[int] = None
+
+    # Structure exit level (pivot swing H/L that triggered the exit)
+    structure_exit_level: Optional[float] = None
 
     # MFE/MAE in points (populated by strategy)
     mfe_pts: Optional[float] = None

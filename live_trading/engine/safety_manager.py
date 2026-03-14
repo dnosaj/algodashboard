@@ -116,9 +116,11 @@ class SafetyManager:
         self._prior_day_gate_prev: dict[str, bool] = {}
         self._prior_day_gate_current: dict[str, bool] = {}
         self._prior_day_buffers: dict[str, float] = {}
+        self._prior_day_level_keys: dict[str, tuple] = {}
         for s in config.strategies:
             if s.prior_day_level_buffer > 0:
                 self._prior_day_buffers[s.instrument] = s.prior_day_level_buffer
+                self._prior_day_level_keys[s.instrument] = s.prior_day_level_keys
 
         # Prior-day ATR gate (per instrument)
         # Tracks daily ranges across ALL bars (not just RTH), computes Wilder ATR(14).
@@ -474,7 +476,9 @@ class SafetyManager:
             self._prior_day_gate_current[inst] = True
             return
 
-        for key in ("high", "low", "vpoc", "vah", "val"):
+        # Check only the level types specified in config (default: all 5)
+        level_keys = self._prior_day_level_keys.get(inst, ("high", "low", "vpoc", "vah", "val"))
+        for key in level_keys:
             lvl = levels.get(key)
             if lvl is not None and abs(bar.close - lvl) <= buffer:
                 self._prior_day_gate_current[inst] = False
@@ -896,10 +900,11 @@ class SafetyManager:
                 if strat and not strat.manual_override:
                     if not self._prior_day_gate_prev.get(strat.instrument, True):
                         levels = self._prior_day_levels.get(strat.instrument, {})
+                        active_keys = cfg.prior_day_level_keys
+                        level_str = " ".join(f"{k.upper()}={levels.get(k, '?')}" for k in active_keys)
                         return False, (
                             f"Near prior-day level (buf={cfg.prior_day_level_buffer}): "
-                            f"H={levels.get('high', '?')} L={levels.get('low', '?')} "
-                            f"VPOC={levels.get('vpoc', '?')}"
+                            f"{level_str}"
                         )
 
         # Prior-day ATR gate
@@ -942,6 +947,50 @@ class SafetyManager:
             )
 
         return True, ""
+
+    def check_all_gates_for_logging(self, instrument: str, strategy_id: str,
+                                     side: str = "") -> str:
+        """Check ALL gates and return comma-separated types of failing gates.
+
+        Called only after check_can_trade() returned False, for enriched logging.
+        Only checks entry gates (VIX, Leledc, prior-day level/ATR, ADR), not
+        operational blocks (halted, paused, position size).
+        """
+        cfg = self._strategy_configs.get(strategy_id)
+        strat = self._strategies.get(strategy_id)
+        if not cfg or not strat or strat.manual_override:
+            return ""
+
+        failing = []
+
+        # VIX death zone
+        if self._vix_close is not None and cfg.vix_death_zone_min > 0:
+            if cfg.vix_death_zone_min <= self._vix_close <= cfg.vix_death_zone_max:
+                failing.append("vix_death_zone")
+
+        # Leledc exhaustion
+        if cfg.leledc_maj_qual > 0:
+            if not self._leledc_gate_prev.get(strat.instrument, True):
+                failing.append("leledc")
+
+        # Prior-day level proximity
+        if cfg.prior_day_level_buffer > 0:
+            if not self._prior_day_gate_prev.get(strat.instrument, True):
+                failing.append("prior_day_level")
+
+        # Prior-day ATR
+        if cfg.prior_day_atr_min > 0:
+            if not self._prior_day_atr_gate_prev.get(strat.instrument, True):
+                failing.append("prior_day_atr")
+
+        # ADR directional
+        if side and cfg.adr_directional_threshold > 0 and cfg.adr_lookback_days > 0:
+            ratio = self._adr_dir_ratio_prev.get(strat.instrument, 0.0)
+            thr = cfg.adr_directional_threshold
+            if (side == "long" and ratio >= thr) or (side == "short" and ratio <= -thr):
+                failing.append("adr_directional")
+
+        return ",".join(failing)
 
     def get_qty_override(self, strategy_id: str) -> Optional[int]:
         """Return qty override for a strategy, or None for default."""

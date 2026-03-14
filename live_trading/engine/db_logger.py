@@ -1,7 +1,7 @@
 """
 Database logger — fire-and-forget async EventBus subscriber.
 
-Subscribes to trade_closed, trade_corrected, and signal_blocked events.
+Subscribes to trade_closed, trade_corrected, signal_blocked, and structure_bar events.
 Enqueues rows to an asyncio.Queue; a background task drains them to Supabase.
 
 Zero latency impact on bar processing. If Supabase is unreachable, logs a
@@ -23,6 +23,7 @@ _GATE_PREFIXES = {
     "VIX death zone": "vix_death_zone",
     "Leledc exhaustion": "leledc",
     "Prior-day level": "prior_day_level",
+    "Near prior-day level": "prior_day_level",
     "Prior-day ATR": "prior_day_atr",
     "ADR directional": "adr_directional",
     "Strategy paused": "strategy_paused",
@@ -166,6 +167,20 @@ class DbLogger:
         except Exception as e:
             logger.warning(f"[DbLogger] Error building blocked signal row: {e}")
 
+    def on_structure_bar(self, payload: dict) -> None:
+        """Handle structure_bar event. Enqueues per-bar observation for async insert."""
+        if not self._running:
+            return
+        try:
+            row = self._structure_bar_to_row(payload)
+            if row is None:
+                return
+            self._queue.put_nowait(("structure_bar", row))
+        except asyncio.QueueFull:
+            pass  # High-volume observation data — silently drop on backpressure
+        except Exception as e:
+            logger.warning(f"[DbLogger] Error building structure_bar row: {e}")
+
     def refresh_views(self) -> None:
         """Trigger materialized view refresh. Called during daily reset."""
         if not self._running:
@@ -240,6 +255,8 @@ class DbLogger:
             # MFE/MAE
             "mfe_pts": getattr(trade, 'mfe_pts', None),
             "mae_pts": getattr(trade, 'mae_pts', None),
+            # Structure exit
+            "structure_exit_level": getattr(trade, 'structure_exit_level', None),
             # Entry bar context
             "entry_bar_range": getattr(trade, 'entry_bar_range', None),
             "concurrent_positions": getattr(trade, 'concurrent_positions', None),
@@ -287,7 +304,7 @@ class DbLogger:
             signal_time = signal_time.replace(tzinfo=timezone.utc)
 
         reason = payload.get("reason", "")
-        gate_type = _extract_gate_type(reason)
+        gate_type = payload.get("gate_types") or _extract_gate_type(reason)
 
         row = {
             "signal_time": signal_time.isoformat(),
@@ -295,6 +312,7 @@ class DbLogger:
             "instrument": payload.get("instrument", ""),
             "side": payload.get("side", ""),
             "price": payload.get("price", 0.0),
+            "signal_price": payload.get("signal_price"),
             "sm_value": payload.get("sm_value"),
             "rsi_value": payload.get("rsi_value"),
             "gate_type": gate_type,
@@ -305,6 +323,31 @@ class DbLogger:
             "gate_adr_ratio": payload.get("gate_adr_ratio"),
             "signal_date": _to_et_date(signal_time),
             "source": self._source,
+        }
+        # Strip None values to let DB defaults apply
+        return {k: v for k, v in row.items() if v is not None}
+
+    def _structure_bar_to_row(self, payload: dict) -> Optional[dict]:
+        """Convert structure_bar event payload to Supabase row."""
+        bar_time = payload.get("bar_time")
+        if bar_time is None:
+            return None
+        if bar_time.tzinfo is None:
+            bar_time = bar_time.replace(tzinfo=timezone.utc)
+
+        row = {
+            "bar_time": bar_time.isoformat(),
+            "strategy_id": payload.get("strategy_id", ""),
+            "instrument": payload.get("instrument", ""),
+            "bar_close": payload.get("bar_close"),
+            "swing_high": payload.get("swing_high"),
+            "swing_low": payload.get("swing_low"),
+            "position": payload.get("position", 0),
+            "entry_price": payload.get("entry_price"),
+            "runner_profit_pts": payload.get("runner_profit_pts"),
+            "distance_to_level_pts": payload.get("distance_to_level_pts"),
+            "near_miss": payload.get("near_miss", False),
+            "trade_date": _to_et_date(bar_time),
         }
         # Strip None values to let DB defaults apply
         return {k: v for k, v in row.items() if v is not None}
@@ -427,6 +470,12 @@ class DbLogger:
                     ignore_duplicates=True
                 ).execute()
             )
+        elif item_type == "structure_bar":
+            await asyncio.to_thread(
+                lambda r=row: self._client.table("structure_bar_logs").upsert(
+                    r, on_conflict="bar_time,strategy_id"
+                ).execute()
+            )
         elif item_type == "gate_snapshot":
             await asyncio.to_thread(lambda r=row: (
                 self._client.table("gate_state_snapshots")
@@ -494,6 +543,10 @@ class DbLogger:
                     ).execute()
                 elif item_type == "trade_correction":
                     self._apply_correction(row)
+                elif item_type == "structure_bar":
+                    self._client.table("structure_bar_logs").upsert(
+                        row, on_conflict="bar_time,strategy_id"
+                    ).execute()
                 elif item_type == "gate_snapshot":
                     self._client.table("gate_state_snapshots").upsert(
                         row, on_conflict="snapshot_date,instrument"

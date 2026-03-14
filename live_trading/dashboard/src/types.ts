@@ -23,6 +23,10 @@ export interface InstrumentData {
   tp_pts: number;
   long_used: boolean;
   short_used: boolean;
+  structure_exit_type?: string;
+  structure_exit_enabled?: boolean;
+  structure_swing_high?: number | null;
+  structure_swing_low?: number | null;
 }
 
 export interface Trade {

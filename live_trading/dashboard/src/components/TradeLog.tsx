@@ -274,6 +274,15 @@ export function TradeLog({ trades }: TradeLogProps) {
                         TP1
                       </span>
                     )}
+                    {trade.exit_reason === 'STRUCTURE' && (
+                      <span style={{
+                        marginLeft: 4, fontSize: 9, color: '#00cc66',
+                        padding: '1px 3px', borderRadius: 2,
+                        backgroundColor: 'rgba(0,204,102,0.12)',
+                      }}>
+                        STR
+                      </span>
+                    )}
                   </td>
                 </tr>
               ))}

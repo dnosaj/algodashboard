@@ -649,7 +649,12 @@ class IncrementalStrategy:
                         return signal
 
         # BE_TIME exit: close stale trades after N bars (bar-close only, not intra-bar)
-        if self.config.breakeven_after_bars > 0 and self.state.position != 0:
+        # Skip when structure exit monitoring is active — structure monitor handles
+        # runner exits, or the 60pt cap catches it. Without this skip, BE_TIME could
+        # close a runner that the structure monitor would have exited profitably.
+        if (self.config.breakeven_after_bars > 0
+                and self.state.position != 0
+                and not self.config.structure_exit_type):
             bars_held = self.bar_idx - self.state.entry_bar_idx - 1  # -1 matches backtest (i-1)-entry_idx
             if bars_held >= self.config.breakeven_after_bars:
                 signal = self._close_position(bar, ExitReason.BE_TIME)

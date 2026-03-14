@@ -40,9 +40,14 @@ class StrategyConfig:
     move_sl_to_be_after_tp1: bool = False  # After TP1 partial fill, move runner SL to entry price
     leledc_maj_qual: int = 0            # Leledc exhaustion threshold (0 = disabled)
     prior_day_level_buffer: float = 0.0 # Block within N pts of prior-day levels (0 = disabled)
+    prior_day_level_keys: tuple = ("high", "low", "vpoc", "vah", "val")  # Which levels to check
     prior_day_atr_min: float = 0.0    # Block when prior-day ATR(14) < threshold (0 = disabled)
     adr_lookback_days: int = 0        # ADR lookback in trading days (0 = disabled)
     adr_directional_threshold: float = 0.0  # Block entries chasing daily direction (0 = disabled)
+    structure_exit_type: str = ""         # "" (disabled) or "pivot"
+    structure_exit_lookback: int = 0      # Left bars for pivot detection
+    structure_exit_pivot_right: int = 2   # Confirmation bars to right (pivot only)
+    structure_exit_buffer_pts: float = 0.0  # Exit N pts before swing level
     session_start_et: str = "10:00"   # RTH start (Eastern Time)
     session_end_et: str = "15:45"     # Last entry allowed
     session_close_et: str = "16:00"   # Force close all positions
@@ -182,8 +187,8 @@ MNQ_VSCALPC = StrategyConfig(
     sm_index=10, sm_flow=12, sm_norm=200, sm_ema=100,
     sm_threshold=0.0,  # Same entries as V15 — runner captures larger moves
     exit_mode="tp_scalp",
-    tp_pts=25,  # TP2: runner target
-    trail_activate_pts=25,
+    tp_pts=60,  # Crash-safety cap: resting OCO at 60pts. Structure monitor exits before this.
+    trail_activate_pts=60,
     trail_distance_pts=8,
     rsi_len=8, rsi_buy=60, rsi_sell=40,
     cooldown=20, max_loss_pts=40,
@@ -201,6 +206,11 @@ MNQ_VSCALPC = StrategyConfig(
     adr_lookback_days=14,             # ADR directional gate: 14-day lookback (STRONG PASS)
     adr_directional_threshold=0.3,    # Block when move_from_open/ADR >= 0.3 in entry direction
     session_end_et="13:00",  # Same late-day cutoff as V15
+    # Structure-based exit: adaptive pivot swing exits on runner (replaces fixed TP2=25)
+    structure_exit_type="pivot",       # Pivot N-bar fractal detection
+    structure_exit_lookback=50,        # Left bars for pivot confirmation
+    structure_exit_pivot_right=2,      # Right confirmation bars
+    structure_exit_buffer_pts=2.0,     # Exit 2pts before swing level (sweet spot from sweep)
 )
 
 MES_V2 = StrategyConfig(
@@ -221,8 +231,10 @@ MES_V2 = StrategyConfig(
     partial_qty=1,         # Close 1 of 2 at TP1
     breakeven_after_bars=75,   # Close stale trades after 75 bars (~1h15m)
     max_strategy_daily_loss=400.0,    # One 2-contract SL is ~$355; $400 allows recovery
-    prior_day_level_buffer=5.0,  # Block within 5 pts of prior-day H/L/VPOC/VAH/VAL
-    session_close_et="15:30",  # EOD 15:30 ET validated for MES
+    prior_day_level_buffer=5.0,  # Block within 5 pts of prior-day levels
+    prior_day_level_keys=("vpoc", "val"),  # VPOC+VAL only — H/L and VAH remove profitable breakouts (Mar 13 breakdown)
+    session_end_et="14:15",    # Last entry 14:15 ET — entries after 14:00 are net negative (PF 0.78-0.87). Mar 13 sweep.
+    session_close_et="16:00",  # No forced close — TP/SL/BE_TIME resolve all trades. 15:30 was v9.4 legacy, never triggered in v2 backtest, killed a live winner Mar 13.
 )
 
 DEFAULT_CONFIG = EngineConfig(

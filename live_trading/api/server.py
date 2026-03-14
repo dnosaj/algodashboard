@@ -87,6 +87,7 @@ class EngineHandle:
         self._force_resume_all = force_resume_all
         self._set_strategy_sizing = set_strategy_sizing
         self._close_strategy_position = None  # Set later if available
+        self._set_structure_exit_enabled = None  # Set later if available
 
     def get_status(self) -> dict:
         return self._get_status()
@@ -138,6 +139,11 @@ class EngineHandle:
     async def close_strategy_position(self, strategy_id: str) -> tuple[bool, str]:
         if self._close_strategy_position:
             return await self._close_strategy_position(strategy_id)
+        return False, "Not available"
+
+    def set_structure_exit_enabled(self, strategy_id: str, enabled: bool) -> tuple[bool, str]:
+        if self._set_structure_exit_enabled:
+            return self._set_structure_exit_enabled(strategy_id, enabled)
         return False, "Not available"
 
     def get_config_snapshot(self) -> ConfigResponse:
@@ -932,6 +938,11 @@ def create_app(handle: EngineHandle) -> FastAPI:
                     elif command == "force_resume":
                         ok, reason = handle.force_resume_all()
                         await ws.send_text(json.dumps({"ack": "force_resumed" if ok else "error", "message": reason}))
+                    elif command == "structure_exit_toggle":
+                        sid = msg.get("strategy_id", "")
+                        enabled = msg.get("enabled", True)
+                        ok, reason = handle.set_structure_exit_enabled(sid, bool(enabled))
+                        await ws.send_text(json.dumps({"ack": "structure_exit_toggled" if ok else "error", "message": reason}))
                     elif command == "strategy_close":
                         sid = msg.get("strategy_id", "")
                         ok, reason = await handle.close_strategy_position(sid)

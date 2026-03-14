@@ -28,6 +28,7 @@ from engine.events import (
 from engine.db_logger import DbLogger
 from engine.intra_bar_monitor import IntraBarExitMonitor
 from engine.strategy import IncrementalStrategy
+from engine.structure_monitor import StructureExitMonitor
 from advisors.base import Advisor
 from advisors.sizing import FixedSizeAdvisor
 from api.server import EngineHandle, create_app
@@ -314,6 +315,8 @@ class EngineState:
     _vix_refetch_task: Optional[asyncio.Task] = None
     # Database logger (Supabase)
     db_logger: Optional[DbLogger] = None
+    # Structure exit monitors (keyed by strategy_id, only for strategies with structure_exit_type)
+    structure_monitors: dict = field(default_factory=dict)  # dict[str, StructureExitMonitor]
 
 
 # ---------------------------------------------------------------------------
@@ -461,8 +464,62 @@ async def process_bar(
             strategy.on_bar(bar)
             return
 
+    # Capture prev_bar BEFORE on_bar() updates it (bar[i-1] convention for structure exit)
+    prev_bar_for_struct = strategy._prev_bar
+
     # Run strategy (emits "bar" event internally, which feeds safety via event bus)
     sig = strategy.on_bar(bar)
+
+    # --- Structure exit check (after strategy.on_bar, before handling signals) ---
+    # Only fires on runner legs (partial_filled=True) when structure monitoring enabled.
+    # Uses prev_bar_for_struct (captured before on_bar) to match backtest bar[i-1] convention.
+    struct_monitor = state.structure_monitors.get(sid)
+    if struct_monitor and struct_monitor.enabled:
+        struct_result = struct_monitor.check_exit(
+            bar=bar,
+            position=strategy.state.position,
+            entry_price=strategy.state.entry_price,
+            partial_filled=strategy.state.partial_filled,
+            prev_bar=prev_bar_for_struct,
+        )
+        if struct_result is not None:
+            # Structure exit fires — close remaining runner position
+            exit_reason = struct_result["exit_reason"]
+            structure_level = struct_result["structure_level"]
+            logger.info(
+                f"[Runner] Structure exit for {sid}: level={structure_level:.2f} "
+                f"fill_price={bar.open:.2f}"
+            )
+            strategy._close_position(bar, exit_reason)
+            # Tag the trade record with the structure level
+            if strategy.trades:
+                strategy.trades[-1].structure_exit_level = structure_level
+
+            # Close position via order manager
+            if state.order_manager:
+                await state.order_manager.close_position(
+                    instrument=bar.instrument,
+                    price_hint=bar.open,
+                    strategy_id=sid,
+                )
+            return
+
+    # --- Structure bar observation (per-bar logging for active runners) ---
+    # Fires every bar where a runner is active and structure monitoring is enabled.
+    # Does NOT fire on the bar where structure exit closes the position (already returned above).
+    if (struct_monitor and struct_monitor.enabled
+            and strategy.state.position != 0
+            and strategy.state.partial_filled):
+        obs = struct_monitor.get_bar_observation(
+            bar=bar,
+            position=strategy.state.position,
+            entry_price=strategy.state.entry_price,
+            partial_filled=strategy.state.partial_filled,
+            prev_bar=prev_bar_for_struct,
+        )
+        if obs is not None:
+            obs["strategy_id"] = sid
+            state.event_bus.emit("structure_bar", obs)
 
     if sig.type == SignalType.NONE:
         return
@@ -516,6 +573,7 @@ async def process_bar(
                     "strategy_id": sid,
                     "side": side,
                     "price": bar.close,
+                    "signal_price": bar.open,  # Correct entry price (matches _open_position)
                     "time": bar.timestamp,
                     "reason": reason,
                     "sm_value": sig.sm_value,
@@ -528,6 +586,12 @@ async def process_bar(
                     blocked_payload["gate_adr_ratio"] = state.safety._adr_dir_ratio_prev.get(bar.instrument)
                     leledc_ok = state.safety._leledc_gate_prev.get(bar.instrument, True)
                     blocked_payload["gate_leledc_active"] = not leledc_ok
+                    # Check all gates for comprehensive logging (not just first)
+                    all_gates = state.safety.check_all_gates_for_logging(
+                        bar.instrument, sid, side
+                    )
+                    if all_gates:
+                        blocked_payload["gate_types"] = all_gates
                 state.event_bus.emit("signal_blocked", blocked_payload)
                 strategy.reject_entry()
                 return
@@ -815,6 +879,9 @@ def _check_daily_reset(bar: Bar, state: EngineState) -> None:
             state.db_logger.snapshot_gate_state(state.safety, prev_day)
         if state.db_logger:
             state.db_logger.refresh_views()
+
+        # Structure monitors NOT reset — swing levels carry across days (matches
+        # backtest which processes all bars continuously without daily pivot reset).
 
         # 5. Reset safety counters + strategy daily state (clears strat.trades)
         if state.safety:
@@ -1171,7 +1238,7 @@ def _build_engine_handle(state: EngineState) -> EngineHandle:
             cooldown_remaining = max(0, strat.config.cooldown - bars_since_exit)
             bars_held = (strat.bar_idx - strat.state.entry_bar_idx) if strat.position != 0 else 0
 
-            instruments[sid] = {
+            inst_data = {
                 "instrument": inst,
                 "strategy_id": sid,
                 "last_price": last_price,
@@ -1187,6 +1254,16 @@ def _build_engine_handle(state: EngineState) -> EngineHandle:
                 "long_used": strat.state.long_used,
                 "short_used": strat.state.short_used,
             }
+
+            # Add structure exit level info if monitor exists
+            struct_mon = state.structure_monitors.get(sid)
+            if struct_mon:
+                inst_data["structure_exit_type"] = strat.config.structure_exit_type
+                inst_data["structure_exit_enabled"] = struct_mon.enabled
+                inst_data["structure_swing_high"] = struct_mon.current_swing_high
+                inst_data["structure_swing_low"] = struct_mon.current_swing_low
+
+            instruments[sid] = inst_data
 
         safety_status = state.safety.get_status() if state.safety else {}
 
@@ -1393,6 +1470,15 @@ def _build_engine_handle(state: EngineState) -> EngineHandle:
         set_strategy_sizing=set_strategy_sizing,
     )
     handle._close_strategy_position = close_strategy_position
+
+    def set_structure_exit_enabled(strategy_id: str, enabled: bool) -> tuple[bool, str]:
+        struct_mon = state.structure_monitors.get(strategy_id)
+        if not struct_mon:
+            return False, f"No structure monitor for {strategy_id}"
+        struct_mon.set_enabled(enabled)
+        return True, f"Structure exit {'enabled' if enabled else 'disabled'} for {strategy_id}"
+
+    handle._set_structure_exit_enabled = set_structure_exit_enabled
     return handle
 
 
@@ -1599,12 +1685,25 @@ async def run(config: EngineConfig) -> None:
     event_bus.subscribe("trade_closed", db_logger.on_trade_closed)
     event_bus.subscribe("trade_corrected", db_logger.on_trade_corrected)
     event_bus.subscribe("signal_blocked", db_logger.on_signal_blocked)
+    event_bus.subscribe("structure_bar", db_logger.on_structure_bar)
 
-    # --- 6. Create strategies (keyed by strategy_id, not instrument) ---
+    # --- 6. Create strategies + structure monitors (keyed by strategy_id) ---
     for strat_config in config.strategies:
         strategy = IncrementalStrategy(strat_config, event_bus)
         sid = strategy.strategy_id
         state.strategies[sid] = strategy
+
+        # Create structure exit monitor if configured
+        if strat_config.structure_exit_type:
+            struct_monitor = StructureExitMonitor(strat_config)
+            state.structure_monitors[sid] = struct_monitor
+            logger.info(
+                f"  Structure monitor: {sid} type={strat_config.structure_exit_type} "
+                f"LB={strat_config.structure_exit_lookback} "
+                f"PR={strat_config.structure_exit_pivot_right} "
+                f"buffer={strat_config.structure_exit_buffer_pts}"
+            )
+
         logger.info(
             f"  Strategy created: {sid} ({strat_config.instrument}) "
             f"exit={strat_config.exit_mode} "
@@ -1630,6 +1729,10 @@ async def run(config: EngineConfig) -> None:
         for bar in warmup_bars_data:
             for strat in strats_for_inst:
                 strat.warmup(bar)
+                # Feed warmup bars to structure monitor (builds swing history)
+                struct_mon = state.structure_monitors.get(strat.strategy_id)
+                if struct_mon:
+                    struct_mon.warmup(bar)
             if state.safety:
                 state.safety.on_bar(bar)
         for strat in strats_for_inst:

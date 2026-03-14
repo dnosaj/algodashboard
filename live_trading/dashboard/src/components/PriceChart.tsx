@@ -8,7 +8,7 @@ import type {
   Time,
   LineData,
 } from 'lightweight-charts';
-import type { BarData, BlockedSignal, Trade, SafetyStatusData, SessionInfo, SessionData } from '../types';
+import type { BarData, BlockedSignal, InstrumentData, Trade, SafetyStatusData, SessionInfo, SessionData } from '../types';
 import { SessionTradeList } from './SessionTradeList';
 
 interface PriceChartProps {
@@ -17,6 +17,7 @@ interface PriceChartProps {
   instrument: string;
   safetyStatus: SafetyStatusData | null;
   blockedSignals: BlockedSignal[];
+  instrumentsData: Record<string, InstrumentData>;
 }
 
 const FONT = "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace";
@@ -175,7 +176,7 @@ const btnStyle = (active?: boolean): React.CSSProperties => ({
   letterSpacing: 0.5,
 });
 
-export function PriceChart({ bars, trades, instrument, safetyStatus, blockedSignals }: PriceChartProps) {
+export function PriceChart({ bars, trades, instrument, safetyStatus, blockedSignals, instrumentsData }: PriceChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
@@ -185,6 +186,9 @@ export function PriceChart({ bars, trades, instrument, safetyStatus, blockedSign
 
   // Pivot Point Supertrend state
   const [ppstEnabled, setPpstEnabled] = useState(false);
+  // Structure level overlay state
+  const [structEnabled, setStructEnabled] = useState(false);
+  const structLineRefs = useRef<IPriceLine[]>([]);
   const [ppstPivotPeriod, setPpstPivotPeriod] = useState(3);
   const [ppstAtrFactor, setPpstAtrFactor] = useState(2);
   const [ppstAtrPeriod, setPpstAtrPeriod] = useState(6);
@@ -565,6 +569,50 @@ export function PriceChart({ bars, trades, instrument, safetyStatus, blockedSign
     ppstSeriesRef.current.setData(lineData);
   }, [ppstEnabled, ppstPivotPeriod, ppstAtrFactor, ppstAtrPeriod, activeBars]);
 
+  // Structure level price lines (swing high/low from status data)
+  useEffect(() => {
+    if (!seriesRef.current) return;
+
+    // Remove old struct lines
+    for (const line of structLineRefs.current) {
+      try { seriesRef.current.removePriceLine(line); } catch { /* already removed */ }
+    }
+    structLineRefs.current = [];
+
+    if (!structEnabled) return;
+
+    // Find structure data for any strategy on the active instrument
+    const entries = Object.values(instrumentsData || {});
+    const structEntry = entries.find(
+      (d) => d.instrument === instrument && d.structure_exit_type
+    );
+    if (!structEntry) return;
+
+    if (structEntry.structure_swing_high != null) {
+      const line = seriesRef.current.createPriceLine({
+        price: structEntry.structure_swing_high,
+        color: '#00cc6688',
+        lineWidth: 1,
+        lineStyle: 2,
+        title: 'SH',
+        axisLabelVisible: true,
+      });
+      structLineRefs.current.push(line);
+    }
+
+    if (structEntry.structure_swing_low != null) {
+      const line = seriesRef.current.createPriceLine({
+        price: structEntry.structure_swing_low,
+        color: '#cc333388',
+        lineWidth: 1,
+        lineStyle: 2,
+        title: 'SL',
+        axisLabelVisible: true,
+      });
+      structLineRefs.current.push(line);
+    }
+  }, [structEnabled, instrumentsData, instrument]);
+
   return (
     <div
       style={{
@@ -632,6 +680,17 @@ export function PriceChart({ bars, trades, instrument, safetyStatus, blockedSign
             {activeBars.length} bars
             {activeTrades.length > 0 && ` / ${activeTrades.length} trades`}
           </span>
+
+          {/* Structure levels toggle */}
+          <button
+            style={{
+              ...btnStyle(structEnabled),
+              ...(structEnabled ? { color: '#00cc66', borderColor: '#00cc6644' } : {}),
+            }}
+            onClick={() => setStructEnabled((v) => !v)}
+          >
+            STRUCT
+          </button>
 
           {/* Pivot Point Supertrend toggle */}
           <button
