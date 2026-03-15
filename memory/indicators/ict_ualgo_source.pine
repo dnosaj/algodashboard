@@ -1,0 +1,20 @@
+// UAlgo ICT Concepts Pine Script — saved Mar 14, 2026
+// Original: https://www.tradingview.com/script/ICT-Concepts-UAlgo/
+// License: Creative Commons Attribution-NonCommercial-ShareAlike 4.0
+// Key functions used in our system:
+//   - detectLogic() -> Order Block 3-bar engulfing pattern (ported to Python in safety_manager.py)
+//   - Fibonacci structure-anchored from lastStructBreakExtreme (ported concept)
+//   - Liquidity sweeps with 20-bar pivots
+//   - BOS/MSS market structure detection
+//
+// Full source pasted by Jason during Mar 14 session.
+// See memory/indicators/ict_concepts.md for analysis and comparison with Python library.
+//
+// NOTE: This is the reference implementation. Our Python port in the engine
+// uses 5-min resampled bars (matching forensics validation), not 1-min.
+
+// [Full Pine Script source was provided by Jason in conversation.
+//  The key detection logic (detectLogic, OB tracking, FVG, liquidity sweeps,
+//  fibonacci, market structure, killzones, SMT divergence) is documented
+//  and analyzed in memory/indicators/ict_concepts.md with the UAlgo vs
+//  Python library comparison table.]
