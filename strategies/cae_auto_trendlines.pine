@@ -1,0 +1,328 @@
+//@version=6
+// CAE-ATL: Chop and Explode with Auto-Trendlines
+// Descending peak trendlines (blue) = long setups
+// Ascending trough trendlines (orange) = short setups
+indicator("CAE Auto-Trendlines", overlay=false, max_lines_count=200,
+     max_labels_count=200, max_bars_back=5000)
+
+// ============================================================================
+// INPUTS
+// ============================================================================
+grp_rsi = "RSI SETTINGS"
+rsi_len_1m   = input.int(11, "RSI Length (1-min)", minval=2, maxval=50, group=grp_rsi)
+show_5m_rsi  = input.bool(true, "Show HTF RSI Overlay", group=grp_rsi)
+rsi_len_5m   = input.int(8, "RSI Length (HTF)", minval=2, maxval=50, group=grp_rsi)
+htf_tf       = input.timeframe("5", "HTF Timeframe", group=grp_rsi)
+
+grp_piv = "PIVOT DETECTION"
+lb_left     = input.int(10, "Pivot Left Bars", minval=3, maxval=50, group=grp_piv)
+lb_right    = input.int(3, "Pivot Right Bars", minval=1, maxval=10, group=grp_piv)
+min_spacing = input.int(10, "Min Bars Between Pivots", minval=1, maxval=50, group=grp_piv)
+
+grp_tl = "TRENDLINES"
+max_tl       = input.int(15, "Max Trendlines per Side", minval=1, maxval=40, group=grp_tl)
+max_age      = input.int(500, "Max Trendline Age (bars)", minval=50, maxval=2000, group=grp_tl)
+show_broken  = input.bool(true, "Show Broken Trendlines", group=grp_tl)
+broken_max   = input.int(300, "Remove Broken After N Bars", minval=10, maxval=1000, group=grp_tl)
+long_color   = input.color(#2196F3, "Long Setup Color (desc peaks)", group=grp_tl)
+short_color  = input.color(#FF9800, "Short Setup Color (asc troughs)", group=grp_tl)
+active_style = input.string("Solid", "Active Line Style", options=["Solid", "Dashed", "Dotted"], group=grp_tl)
+broken_style = input.string("Dashed", "Broken Line Style", options=["Solid", "Dashed", "Dotted"], group=grp_tl)
+active_width = input.int(2, "Active Line Width", minval=1, maxval=5, group=grp_tl)
+broken_width = input.int(2, "Broken Line Width", minval=1, maxval=5, group=grp_tl)
+broken_transp = input.int(30, "Broken Line Transparency", minval=0, maxval=90, step=10, group=grp_tl)
+
+grp_disp = "DISPLAY"
+break_thresh = input.float(0.0, "Break Threshold (RSI pts)", minval=0, maxval=10, step=0.5, group=grp_disp)
+show_breaks  = input.bool(true, "Show Break Signals", group=grp_disp)
+show_zones   = input.bool(true, "Show Zones", group=grp_disp)
+show_pivots  = input.bool(true, "Show Pivot Dots", group=grp_disp)
+show_sessions = input.bool(true, "Show 09:30/18:00 ET", group=grp_disp)
+
+// Resolve line styles from string inputs
+act_style = active_style == "Dotted" ? line.style_dotted : active_style == "Dashed" ? line.style_dashed : line.style_solid
+brk_style = broken_style == "Dotted" ? line.style_dotted : broken_style == "Dashed" ? line.style_dashed : line.style_solid
+
+// ============================================================================
+// RSI COMPUTATION
+// ============================================================================
+rsi_1m = ta.rsi(close, rsi_len_1m)
+rsi_5m = request.security(syminfo.tickerid, htf_tf,
+     ta.rsi(close, rsi_len_5m), lookahead=barmerge.lookahead_off)
+
+// ============================================================================
+// ZONE RENDERING
+// ============================================================================
+h70 = hline(70, "70", color=color.new(color.gray, 70), linestyle=hline.style_dotted)
+h60 = hline(60, "60", color=color.new(color.gray, 70), linestyle=hline.style_dotted)
+h55 = hline(55, "55", color=color.new(color.gray, 85), linestyle=hline.style_dotted)
+h50 = hline(50, "50", color=color.white, linestyle=hline.style_dashed)
+h45 = hline(45, "45", color=color.new(color.gray, 85), linestyle=hline.style_dotted)
+h40 = hline(40, "40", color=color.new(color.gray, 70), linestyle=hline.style_dotted)
+h30 = hline(30, "30", color=color.new(color.gray, 70), linestyle=hline.style_dotted)
+fill(h60, h70, color=show_zones ? color.new(color.green, 90) : na)
+fill(h40, h60, color=show_zones ? color.new(color.yellow, 90) : na)
+fill(h30, h40, color=show_zones ? color.new(color.red, 90) : na)
+fill(h45, h55, color=show_zones ? color.new(color.black, 60) : na)
+
+// ============================================================================
+// RSI PLOTTING
+// ============================================================================
+plot(rsi_1m, "RSI 1m", color=color.white, linewidth=2)
+plot(rsi_1m > 60 ? rsi_1m : na, "RSI >60", color=#2196F3, linewidth=3, style=plot.style_linebr)
+plot(rsi_1m < 40 ? rsi_1m : na, "RSI <40", color=#9C27B0, linewidth=3, style=plot.style_linebr)
+plot(show_5m_rsi and not na(rsi_5m) ? rsi_5m : na, "RSI HTF", color=#888888, linewidth=1, style=plot.style_stepline)
+
+// ============================================================================
+// PIVOT DETECTION
+// ============================================================================
+ph = ta.pivothigh(rsi_1m, lb_left, lb_right)
+pl = ta.pivotlow(rsi_1m, lb_left, lb_right)
+
+var array<int>   peak_bars = array.new<int>(0)
+var array<float> peak_vals = array.new<float>(0)
+var array<int>   trough_bars = array.new<int>(0)
+var array<float> trough_vals = array.new<float>(0)
+
+// ============================================================================
+// TRENDLINE STATE -- 5 parallel arrays per side
+// ============================================================================
+var array<line>  long_lines   = array.new<line>(0)
+var array<int>   long_x1      = array.new<int>(0)
+var array<float> long_y1      = array.new<float>(0)
+var array<float> long_slope   = array.new<float>(0)
+var array<int>   long_broken  = array.new<int>(0)
+
+var array<line>  short_lines  = array.new<line>(0)
+var array<int>   short_x1     = array.new<int>(0)
+var array<float> short_y1     = array.new<float>(0)
+var array<float> short_slope  = array.new<float>(0)
+var array<int>   short_broken = array.new<int>(0)
+
+// Break signal flags
+var bool bull_break = false
+var bool bear_break = false
+bull_break := false
+bear_break := false
+
+// Grace period before checking breaks
+int grace = min_spacing + 2 * lb_right
+
+// ============================================================================
+// TRENDLINE CONSTRUCTION -- inline, no helper function
+// ============================================================================
+
+// --- Peaks: detect and build descending peak trendlines (long setup, blue) ---
+if not na(ph)
+    int pbar = bar_index - lb_right
+    float pval = ph
+    bool spacing_ok = true
+    if array.size(peak_bars) > 0
+        if pbar - array.get(peak_bars, array.size(peak_bars) - 1) < min_spacing
+            spacing_ok := false
+    if spacing_ok
+        array.push(peak_bars, pbar)
+        array.push(peak_vals, pval)
+        if array.size(peak_bars) > 20
+            array.shift(peak_bars)
+            array.shift(peak_vals)
+        if array.size(peak_bars) >= 2
+            int pb = array.get(peak_bars, array.size(peak_bars) - 2)
+            float pv = array.get(peak_vals, array.size(peak_vals) - 2)
+            if pval < pv
+                float sl = (pval - pv) / math.max(pbar - pb, 1)
+                line ln = line.new(pb, pv, pbar, pval, xloc=xloc.bar_index, color=long_color, style=act_style, width=active_width)
+                array.push(long_lines, ln)
+                array.push(long_x1, pb)
+                array.push(long_y1, pv)
+                array.push(long_slope, sl)
+                array.push(long_broken, 0)
+                if array.size(long_lines) > max_tl
+                    line.delete(array.shift(long_lines))
+                    array.shift(long_x1)
+                    array.shift(long_y1)
+                    array.shift(long_slope)
+                    array.shift(long_broken)
+
+// --- Troughs: detect and build ascending trough trendlines (short setup, orange) ---
+if not na(pl)
+    int tbar = bar_index - lb_right
+    float tval = pl
+    bool spacing_ok2 = true
+    if array.size(trough_bars) > 0
+        if tbar - array.get(trough_bars, array.size(trough_bars) - 1) < min_spacing
+            spacing_ok2 := false
+    if spacing_ok2
+        array.push(trough_bars, tbar)
+        array.push(trough_vals, tval)
+        if array.size(trough_bars) > 20
+            array.shift(trough_bars)
+            array.shift(trough_vals)
+        if array.size(trough_bars) >= 2
+            int tb = array.get(trough_bars, array.size(trough_bars) - 2)
+            float tv = array.get(trough_vals, array.size(trough_vals) - 2)
+            if tval > tv
+                float sl2 = (tval - tv) / math.max(tbar - tb, 1)
+                line ln2 = line.new(tb, tv, tbar, tval, xloc=xloc.bar_index, color=short_color, style=act_style, width=active_width)
+                array.push(short_lines, ln2)
+                array.push(short_x1, tb)
+                array.push(short_y1, tv)
+                array.push(short_slope, sl2)
+                array.push(short_broken, 0)
+                if array.size(short_lines) > max_tl
+                    line.delete(array.shift(short_lines))
+                    array.shift(short_x1)
+                    array.shift(short_y1)
+                    array.shift(short_slope)
+                    array.shift(short_broken)
+
+// ============================================================================
+// TRENDLINE EXTENSION + BREAKOUT + PRUNING -- long setup lines
+// ============================================================================
+if array.size(long_lines) > 0
+    int i = array.size(long_lines) - 1
+    while i >= 0
+        int brk = array.get(long_broken, i)
+        int x1v = array.get(long_x1, i)
+        float y1v = array.get(long_y1, i)
+        float slp = array.get(long_slope, i)
+        float proj = y1v + slp * (bar_index - x1v)
+        bool do_remove = false
+        if brk == 0 and (bar_index - x1v) > max_age
+            do_remove := true
+        if brk > 0 and (bar_index - brk) > broken_max
+            do_remove := true
+        if brk == 0 and (proj > 105 or proj < -5)
+            do_remove := true
+        if do_remove
+            line.delete(array.get(long_lines, i))
+            array.remove(long_lines, i)
+            array.remove(long_x1, i)
+            array.remove(long_y1, i)
+            array.remove(long_slope, i)
+            array.remove(long_broken, i)
+        else
+            // Extend ALL lines (broken and unbroken) to current bar
+            if proj >= -5 and proj <= 105
+                line.set_x2(array.get(long_lines, i), bar_index)
+                line.set_y2(array.get(long_lines, i), proj)
+            if brk == 0
+                // Check for bullish break (RSI above descending line)
+                if (bar_index - x1v) > grace and not na(rsi_1m) and rsi_1m > proj + break_thresh
+                    array.set(long_broken, i, bar_index)
+                    bull_break := true
+                    if show_broken
+                        line.set_style(array.get(long_lines, i), brk_style)
+                        line.set_width(array.get(long_lines, i), broken_width)
+                        line.set_color(array.get(long_lines, i), color.new(long_color, broken_transp))
+                    else
+                        line.delete(array.get(long_lines, i))
+                        array.remove(long_lines, i)
+                        array.remove(long_x1, i)
+                        array.remove(long_y1, i)
+                        array.remove(long_slope, i)
+                        array.remove(long_broken, i)
+            else if brk > 0
+                if not show_broken
+                    line.set_color(array.get(long_lines, i), color.new(long_color, 100))
+        i -= 1
+
+// ============================================================================
+// TRENDLINE EXTENSION + BREAKOUT + PRUNING -- short setup lines
+// ============================================================================
+if array.size(short_lines) > 0
+    int j = array.size(short_lines) - 1
+    while j >= 0
+        int brk2 = array.get(short_broken, j)
+        int x1v2 = array.get(short_x1, j)
+        float y1v2 = array.get(short_y1, j)
+        float slp2 = array.get(short_slope, j)
+        float proj2 = y1v2 + slp2 * (bar_index - x1v2)
+        bool do_remove2 = false
+        if brk2 == 0 and (bar_index - x1v2) > max_age
+            do_remove2 := true
+        if brk2 > 0 and (bar_index - brk2) > broken_max
+            do_remove2 := true
+        if brk2 == 0 and (proj2 > 105 or proj2 < -5)
+            do_remove2 := true
+        if do_remove2
+            line.delete(array.get(short_lines, j))
+            array.remove(short_lines, j)
+            array.remove(short_x1, j)
+            array.remove(short_y1, j)
+            array.remove(short_slope, j)
+            array.remove(short_broken, j)
+        else
+            // Extend ALL lines (broken and unbroken) to current bar
+            if proj2 >= -5 and proj2 <= 105
+                line.set_x2(array.get(short_lines, j), bar_index)
+                line.set_y2(array.get(short_lines, j), proj2)
+            if brk2 == 0
+                // Check for bearish break (RSI below ascending line)
+                if (bar_index - x1v2) > grace and not na(rsi_1m) and rsi_1m < proj2 - break_thresh
+                    array.set(short_broken, j, bar_index)
+                    bear_break := true
+                    if show_broken
+                        line.set_style(array.get(short_lines, j), brk_style)
+                        line.set_width(array.get(short_lines, j), broken_width)
+                        line.set_color(array.get(short_lines, j), color.new(short_color, broken_transp))
+                    else
+                        line.delete(array.get(short_lines, j))
+                        array.remove(short_lines, j)
+                        array.remove(short_x1, j)
+                        array.remove(short_y1, j)
+                        array.remove(short_slope, j)
+                        array.remove(short_broken, j)
+            else if brk2 > 0
+                if not show_broken
+                    line.set_color(array.get(short_lines, j), color.new(short_color, 100))
+        j -= 1
+
+// ============================================================================
+// PIVOT MARKERS
+// ============================================================================
+plotshape(show_pivots and not na(ph) ? ph : na, title="Peak", style=shape.circle,
+     location=location.absolute, color=color.red, size=size.tiny, offset=-lb_right)
+plotshape(show_pivots and not na(pl) ? pl : na, title="Trough", style=shape.circle,
+     location=location.absolute, color=color.green, size=size.tiny, offset=-lb_right)
+
+// ============================================================================
+// BREAKOUT SIGNALS
+// ============================================================================
+plotshape(show_breaks and bull_break, title="Bull Break",
+     style=shape.triangleup, location=location.bottom,
+     color=color.green, size=size.small, text="BRK")
+plotshape(show_breaks and bear_break, title="Bear Break",
+     style=shape.triangledown, location=location.top,
+     color=color.red, size=size.small, text="BRK")
+
+// ============================================================================
+// SESSION LINES
+// ============================================================================
+if show_sessions
+    t1 = time("1", "0930-0931", "America/New_York")
+    if not na(t1) and na(time("1", "0930-0931", "America/New_York")[1])
+        line.new(bar_index, 0, bar_index, 100, xloc=xloc.bar_index,
+             color=color.new(color.gray, 30), style=line.style_dashed, width=1)
+    t2 = time("1", "1800-1801", "America/New_York")
+    if not na(t2) and na(time("1", "1800-1801", "America/New_York")[1])
+        line.new(bar_index, 0, bar_index, 100, xloc=xloc.bar_index,
+             color=color.new(color.gray, 30), style=line.style_dashed, width=1)
+
+// ============================================================================
+// INFO TABLE
+// ============================================================================
+var table info = table.new(position.top_right, 2, 6, bgcolor=color.new(color.black, 80))
+if barstate.islastconfirmedhistory
+    table.cell(info, 0, 0, "CAE-ATL", text_color=color.white, text_size=size.small)
+    table.cell(info, 1, 0, "v2", text_color=color.aqua, text_size=size.small)
+    table.cell(info, 0, 1, "RSI", text_color=color.gray, text_size=size.small)
+    table.cell(info, 1, 1, str.tostring(rsi_len_1m), text_color=color.white, text_size=size.small)
+    table.cell(info, 0, 2, "Pivots", text_color=color.gray, text_size=size.small)
+    table.cell(info, 1, 2, str.tostring(lb_left) + "/" + str.tostring(lb_right), text_color=color.white, text_size=size.small)
+    table.cell(info, 0, 3, "Grace", text_color=color.gray, text_size=size.small)
+    table.cell(info, 1, 3, str.tostring(grace), text_color=color.white, text_size=size.small)
+    table.cell(info, 0, 4, "Long TLs", text_color=color.gray, text_size=size.small)
+    table.cell(info, 1, 4, str.tostring(array.size(long_lines)), text_color=#2196F3, text_size=size.small)
+    table.cell(info, 0, 5, "Short TLs", text_color=color.gray, text_size=size.small)
+    table.cell(info, 1, 5, str.tostring(array.size(short_lines)), text_color=#FF9800, text_size=size.small)

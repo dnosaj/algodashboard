@@ -33,3 +33,10 @@ Accumulated bugs and lessons from implementing strategies in TradingView Pine v6
 - `pyramiding=N` needed (default 1 silently rejects 2nd entry)
 - `close_entries_rule="ANY"` needed (default FIFO ignores entry ID in strategy.close)
 - BUT shared position = shared risk — use separate strategies for truly independent legs
+
+## Drawing Objects (line.new, label.new)
+- `line.new()` inside user-defined helper functions does NOT render visible lines. Lines are created (tracked in arrays, breaks detected) but invisible on chart. **Fix**: Inline `line.new()` at top-level scope, not inside `=>` functions. Discovered Mar 15 with CAE-ATL indicator.
+- `var int` cannot hold function return of type `series int`. Happens when function uses ternary on `line.style_*` constants. **Fix**: Inline the ternary at top level without `var`.
+- `//@version=6` must be the FIRST line of the script (before comments). Otherwise: "Scripts must contain one declaration statement" error.
+- `max_lines_count=N` on `indicator()` declaration controls max simultaneous line objects (default 50). Set higher for indicators with many trendlines.
+- Trendlines built from `ta.pivothigh/low` need a grace period before checking for breaks — RSI typically moves past the projected line by the time the pivot is confirmed (`lb_right` bars later).

@@ -208,6 +208,20 @@ Updated after each session. Rejections are as important as implementations.
 - **DESIGNED** ICT Dashboard Levels (9-agent Phase 2). London H/L DROPPED after gate sweep showed <1% block rate and no directional edge. Final scope: Weekly VPOC (green) + Weekly VAL (red) + Order Block zones (red/green).
 - **IMPLEMENTED** ICT Dashboard Levels (Phase 4). 419 lines across 11 files. Engine: weekly VPOC/VAL (Monday computation from prior week RTH, gate_state persistence, bin_width per instrument), Order Block tracking (3-bar UAlgo engulfing, max 2/direction, mitigate on close-through), get_ict_proximity (observation only). Dashboard: ICT toggle, green wPOC line (conviction opacity + proximity style toggle), red wVAL line, OB zones as 3 price lines (top/bottom/mid). Trade tagging at entry time. Migration 009. Plan: `plans/ict-dashboard-levels.md`.
 
+## Mar 15, 2026
+- **IMPLEMENTED** Developing Daily VPOC engine accumulator. SafetyManager: daily volume profile bins (RTH-only, per-instrument), `_compute_value_area()[0]` for VPOC, VCR (volume concentration ratio = max_bin_vol/total_vol), stability index (bars since last dPOC shift). Resets daily. ~46 lines in safety_manager.py + 1 line server.py session save.
+- **IMPLEMENTED** Dashboard dPOC line. Cyan `#00cccc` dotted line under ICT toggle, label "dPOC". Types: `dvpoc_strength`, `dvpoc_stability` added to `ICTLevelData`. Session replay works automatically.
+- **IMPLEMENTED** VCR badge on SafetyPanel. Green (<0.12), yellow (0.12-0.26), red (>0.26) per instrument. Observation only.
+- **FIXED** `_finalize_prior_day` bin_width bug. Hardcoded `bin_width=5.0` → `self._weekly_bin_width.get(inst, 5.0)`. MNQ now uses bin_width=2.0 for prior-day VPOC.
+- **COMPLETED** Developing VPOC Forensics (1,088 trades, 12.8 months). Key findings: (1) dVPOC proximity is NEGATIVE for momentum entries overall (WR -5.4pp at 0-5pts, +3.5pp at 20+pts). (2) **VCR regime is strongest signal** — Q4 (concentrated, >0.263) WR 62.9% vs Q1 (dispersed) 78.3% (-15.4pp). (3) dVPOC-VWAP consensus is second strongest — when dPOC and VWAP agree (<3pts), WR drops 6.7pp. (4) vScalpA does BETTER near dVPOC (TP=7 captures magnet bounce). (5) MES shows strongest distance effect (+9.6pp from 0-5 to 20+). (6) Stability index NOT a signal (-1.5pp). (7) Prior-day VPOC for MNQ NOT actionable (94% of entries >10pts away). Script: `backtesting_engine/strategies/developing_vpoc_forensics.py`.
+- **COMPLETED** VCR + dVPOC gate sweep (IS/OOS, pre-filter). VCR thresholds [0.10-0.30] × min_bars [0,30,60] × 4 strategies + MES dVPOC distance [5,7,10]. Script: `backtesting_engine/strategies/vcr_dvpoc_gate_sweep.py`.
+- **REJECTED** VCR as hard gate for vScalpA/vScalpB. vScalpA: IS often negative, tiny improvements (1-4% PF). vScalpB: filter-resistant as always, IS degrades at every threshold.
+- **REJECTED** VCR as hard gate for MES v2. Blocks 56% of entries at best threshold (0.25), loses raw P&L on both IS (-$871) and OOS (-$330). MES continues to reject all gate candidates.
+- **REJECTED** MES dVPOC distance gate. All 3 thresholds show IS/OOS divergence. FAIL.
+- **SHELVED** VCR gate for vScalpC. VCR>0.15 shows STRONG IS/OOS PF improvement (+5.6%/+32.6%) but IS P&L drops -$111. VCR>0.30 adds P&L on both sides but only blocks 5 trades/year. Adopted as observation (dashboard badge + Supabase logging) — Digest Agent to monitor and flag if pattern strengthens. Revisit when 50+ VCR>0.26 observations collected.
+- **IMPLEMENTED** VCR data pipeline to Supabase. Migration 010: `dvpoc_price`, `dvpoc_strength`, `dvpoc_stability` columns on `gate_state_snapshots`. Digest Agent `get_market_regime` and `get_gate_state` tools can query VCR data.
+- **NOTED** Domain insight: VPOC magnet effect opposes SM momentum entries. Entries near developing VPOC fight mean-reversion gravity. Effect strongest on MES (wide TP=20 needs room to run) and vScalpC runner (long exposure). vScalpA's TP=7 actually benefits from VPOC proximity (captures magnet bounce).
+
 ---
 
 ## Meta-Patterns
@@ -219,3 +233,12 @@ Updated after each session. Rejections are as important as implementations.
 - **Exit-side filters universally fail** for these strategies. Only entry-side gates show value.
 - **Combined/stacked filters always fail** due to geometric trade count reduction.
 - **vScalpB (SM_T=0.25) is filter-resistant.** High-conviction entries are uncorrelated with most volatility/momentum features.
+- **VPOC magnet opposes momentum entries.** Developing daily VPOC acts as mean-reversion anchor — SM momentum entries near it underperform (except vScalpA's TP=7 which captures the bounce).
+- **VCR (volume concentration) is a real regime signal** but too sparse to gate. Monitor as observation, revisit when data accumulates.
+
+
+## Mar 15, 2026
+- **IMPLEMENTED** CAE-ATL Pine Script indicator: RSI(11) Chop-and-Explode with auto-trendlines. Descending peak trendlines (blue, long setups), ascending trough trendlines (orange, short setups). Breakout detection, configurable styles/colors/widths. (`strategies/cae_auto_trendlines.pine`)
+- **LEARNED** Pine v6: `line.new()` inside helper functions does not render visible lines. Must inline at top-level scope. Discovered after 3 debugging iterations.
+- **LEARNED** Pine v6: trendline grace period needed — trendlines break immediately on creation bar if RSI has already moved past the projected line. Grace = `min_spacing + 2*lb_right` bars.
+- **LEARNED** Pine v6: `var int` cannot hold return of function producing `series int`. Inline ternaries work.
