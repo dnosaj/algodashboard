@@ -55,3 +55,13 @@ These ideas represent potential NEW STRATEGIES, not filters on existing ones. Th
 3. We want to diversify beyond SM+RSI entries
 
 The RSI trendline breakout is the most immediately testable — it's pure math on data we already have.
+
+## Dashboard Visualization Request (Mar 14, late night)
+
+Jason wants to see on the dashboard chart:
+- **1-min RSI and 5-min RSI overlayed** on top of each other (lower pane or overlay)
+- **Automatic trendlines** drawn connecting RSI peaks/troughs
+- **Two timeframes of trendlines**: overnight session RSI trendlines + intraday RSI trendlines
+- The goal: visually see when RSI breaks through its own trendline in real-time, especially when overnight trendlines break during NY session
+
+This is both a visualization feature AND a potential new entry signal to backtest.
