@@ -667,6 +667,19 @@ export function PriceChart({ bars, trades, instrument, safetyStatus, blockedSign
       });
       ictLineRefs.current.push(line);
     }
+
+    // Developing daily VPOC — cyan dotted, moves each bar
+    if (levels.developing_vpoc != null) {
+      const line = seriesRef.current.createPriceLine({
+        price: levels.developing_vpoc,
+        color: '#00cccc',
+        lineWidth: 1,
+        lineStyle: 3,  // Dotted
+        title: 'dPOC',
+        axisLabelVisible: true,
+      });
+      ictLineRefs.current.push(line);
+    }
   }, [ictEnabled, safetyStatus?.ict_levels, instrument, activeBars, replayMode, replayIctLevels]);
 
   // ICT Order Block zone price lines

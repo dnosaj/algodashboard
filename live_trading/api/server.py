@@ -747,6 +747,7 @@ def create_app(handle: EngineHandle) -> FastAPI:
                         "weekly_val": getattr(safety, '_weekly_val', {}).get(inst),
                         "vpoc_strength": getattr(safety, '_weekly_vpoc_strength', {}).get(inst, 0),
                         "ob_zones": getattr(safety, '_active_obs', {}).get(inst, []),
+                        "developing_vpoc": getattr(safety, '_developing_vpoc', {}).get(inst),
                     }
 
         session = {

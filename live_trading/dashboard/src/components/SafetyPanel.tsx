@@ -152,6 +152,28 @@ export function SafetyPanel({ safety, positions, sendCommand, instrumentsData }:
           <span style={{ fontSize: 10, color: '#666', fontFamily: FONT }}>
             5d SL: {safety.rolling_sl_5d}
           </span>
+          {/* VCR badges per instrument */}
+          {safety.ict_levels && Object.entries(safety.ict_levels).map(([inst, levels]) => {
+            const vcr = levels.dvpoc_strength ?? 0;
+            const vcrColor = vcr > 0.26 ? '#ff4444' : vcr >= 0.12 ? '#ffaa00' : '#00ff88';
+            const vcrBg = vcr > 0.26
+              ? 'rgba(255,68,68,0.12)'
+              : vcr >= 0.12
+                ? 'rgba(255,170,0,0.12)'
+                : 'rgba(0,255,136,0.12)';
+            return (
+              <span
+                key={`vcr-${inst}`}
+                style={{
+                  fontSize: 10, fontFamily: FONT, fontWeight: 600,
+                  padding: '2px 6px', borderRadius: 3,
+                  backgroundColor: vcrBg, color: vcrColor,
+                }}
+              >
+                {inst} VCR: {vcr.toFixed(2)}
+              </span>
+            );
+          })}
           <button
             onClick={() => sendCommand('drawdown_toggle', { enabled: !safety.drawdown_enabled })}
             style={{

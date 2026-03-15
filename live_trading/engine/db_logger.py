@@ -415,6 +415,9 @@ class DbLogger:
                 "opening_range_low": or_low,
                 "weekly_vpoc": getattr(safety, '_weekly_vpoc', {}).get(inst),
                 "weekly_val": getattr(safety, '_weekly_val', {}).get(inst),
+                "dvpoc_price": getattr(safety, '_developing_vpoc', {}).get(inst),
+                "dvpoc_strength": getattr(safety, '_daily_vpoc_strength', {}).get(inst),
+                "dvpoc_stability": getattr(safety, '_dvpoc_stability', {}).get(inst),
             }
             # Strip None values
             row = {k: v for k, v in row.items() if v is not None}

@@ -140,7 +140,10 @@ export interface SafetyStrategyStatus {
 export interface ICTLevelData {
   weekly_vpoc: number | null;
   weekly_val: number | null;
-  vpoc_strength: number;  // 0-1, for conviction opacity
+  vpoc_strength: number;  // 0-1, weekly conviction opacity
+  developing_vpoc: number | null;
+  dvpoc_strength: number;  // 0-1, daily VCR (volume concentration ratio)
+  dvpoc_stability: number;  // bars since last dPOC shift
 }
 
 export interface OBZone {

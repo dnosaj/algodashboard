@@ -182,6 +182,13 @@ class SafetyManager:
             if inst not in self._weekly_bin_width:
                 self._weekly_bin_width[inst] = 2.0 if "MNQ" in inst else 5.0
 
+        # Developing Daily VPOC — intraday volume profile (observation only)
+        self._daily_vpoc_closes: dict[str, list[float]] = {}
+        self._daily_vpoc_volumes: dict[str, list[float]] = {}
+        self._developing_vpoc: dict[str, float | None] = {}
+        self._daily_vpoc_strength: dict[str, float] = {}  # VCR: max_bin_vol / total_vol
+        self._dvpoc_stability: dict[str, int] = {}  # bars since last dPOC shift
+
         # Order Block tracking (UAlgo 3-bar engulfing pattern on 5-MIN bars)
         # OBs persist until mitigated — no daily/weekly reset
         # Detection runs on 5-min resampled bars (matching forensics validation).
@@ -468,6 +475,44 @@ class SafetyManager:
                     self._weekly_rth_volumes[inst] = []
                 self._weekly_rth_closes[inst].append(bar.close)
                 self._weekly_rth_volumes[inst].append(bar.volume)
+
+            # Developing Daily VPOC: accumulate RTH closes + volumes, recompute each bar
+            if inst in self._weekly_bin_width and bar.volume > 0:
+                if inst not in self._daily_vpoc_closes:
+                    self._daily_vpoc_closes[inst] = []
+                    self._daily_vpoc_volumes[inst] = []
+                self._daily_vpoc_closes[inst].append(bar.close)
+                self._daily_vpoc_volumes[inst].append(bar.volume)
+                bw = self._weekly_bin_width[inst]
+                result = self._compute_value_area(
+                    self._daily_vpoc_closes[inst],
+                    self._daily_vpoc_volumes[inst],
+                    bin_width=bw,
+                )
+                if result is not None:
+                    new_vpoc = result[0]
+                    prev_vpoc = self._developing_vpoc.get(inst)
+                    if prev_vpoc is not None and new_vpoc != prev_vpoc:
+                        self._dvpoc_stability[inst] = 0
+                    else:
+                        self._dvpoc_stability[inst] = self._dvpoc_stability.get(inst, 0) + 1
+                    self._developing_vpoc[inst] = new_vpoc
+                    # VCR: max_bin_vol / total_vol (inline binning)
+                    closes = self._daily_vpoc_closes[inst]
+                    volumes = self._daily_vpoc_volumes[inst]
+                    total_vol = sum(volumes)
+                    if total_vol > 0:
+                        price_min = math.floor(min(closes) / bw) * bw
+                        price_max = math.ceil(max(closes) / bw) * bw
+                        if price_min == price_max:
+                            price_max = price_min + bw
+                        n_bins = int(round((price_max - price_min) / bw)) + 1
+                        bin_vols = [0.0] * n_bins
+                        for c, v in zip(closes, volumes):
+                            idx = int(round((c - price_min) / bw))
+                            idx = min(max(idx, 0), n_bins - 1)
+                            bin_vols[idx] += v
+                        self._daily_vpoc_strength[inst] = round(max(bin_vols) / total_vol, 4)
 
         # Order Block tracking: accumulate 1-min into 5-min, detect on 5-min completion
         self._update_order_blocks_5min(bar)
@@ -844,7 +889,7 @@ class SafetyManager:
 
         # Compute volume profile (VPOC, VAH, VAL)
         if rth["closes"] and rth["volumes"]:
-            profile = self._compute_value_area(rth["closes"], rth["volumes"], bin_width=5.0)
+            profile = self._compute_value_area(rth["closes"], rth["volumes"], bin_width=self._weekly_bin_width.get(inst, 5.0))
             if profile is not None:
                 levels["vpoc"], levels["vah"], levels["val"] = profile
 
@@ -1368,6 +1413,13 @@ class SafetyManager:
         self._or_low.clear()
         self._or_finalized.clear()
 
+        # Reset developing daily VPOC
+        self._daily_vpoc_closes.clear()
+        self._daily_vpoc_volumes.clear()
+        self._developing_vpoc.clear()
+        self._daily_vpoc_strength.clear()
+        self._dvpoc_stability.clear()
+
         # 6b. Weekly VPOC/VAL: on Monday, compute from prior week's accumulated data
         now_et = datetime.now(_ET)
         if now_et.weekday() == 0:  # Monday
@@ -1546,6 +1598,9 @@ class SafetyManager:
                     "weekly_vpoc": round(self._weekly_vpoc[inst], 2) if self._weekly_vpoc.get(inst) is not None else None,
                     "weekly_val": round(self._weekly_val[inst], 2) if self._weekly_val.get(inst) is not None else None,
                     "vpoc_strength": self._weekly_vpoc_strength.get(inst, 0),
+                    "developing_vpoc": round(self._developing_vpoc[inst], 2) if self._developing_vpoc.get(inst) is not None else None,
+                    "dvpoc_strength": round(self._daily_vpoc_strength.get(inst, 0.0), 4),
+                    "dvpoc_stability": self._dvpoc_stability.get(inst, 0),
                 }
                 for inst in self._weekly_bin_width
             },

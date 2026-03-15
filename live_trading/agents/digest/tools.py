@@ -180,7 +180,7 @@ TOOL_DEFINITIONS = [
     },
     {
         "name": "get_market_regime",
-        "description": "Get market regime context: RTH OHLC, range percentile vs last 30 days, day type (trending/choppy/mixed), VWAP close, opening range (initial balance). Use days>1 for multi-day context (e.g. 'range expanding for 5 days'). Derived from gate_state_snapshots.",
+        "description": "Get market regime context: RTH OHLC, range percentile vs last 30 days, day type (trending/choppy/mixed), VWAP close, opening range (initial balance), developing VPOC (dvpoc_price, dvpoc_strength/VCR 0-1, dvpoc_stability). Use days>1 for multi-day context (e.g. 'range expanding for 5 days'). Derived from gate_state_snapshots.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -640,7 +640,8 @@ def get_market_regime(client, *, date: str, instrument: str = None, days: int = 
     query = (
         client.table("gate_state_snapshots")
         .select("snapshot_date,instrument,rth_open,rth_high,rth_low,rth_close,"
-                "adr_value,atr_value,vix_close,vwap_close,opening_range_high,opening_range_low")
+                "adr_value,atr_value,vix_close,vwap_close,opening_range_high,opening_range_low,"
+                "dvpoc_price,dvpoc_strength,dvpoc_stability")
         .gte("snapshot_date", start)
         .lte("snapshot_date", date)
     )
