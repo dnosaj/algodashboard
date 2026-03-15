@@ -11,6 +11,7 @@ import { DailyPnL } from './components/DailyPnL';
 import { SafetyPanel } from './components/SafetyPanel';
 import { NewsAlert } from './components/NewsAlert';
 import { AnalyticsPanel } from './components/AnalyticsPanel';
+import { ContextPanel } from './components/ContextPanel';
 import { IntelPanel } from './components/IntelPanel';
 
 const WS_URL = `ws://${window.location.hostname}:${window.location.port || '8000'}/ws`;
@@ -88,6 +89,13 @@ function App() {
       {safetyStatus && (
         <div style={{ marginBottom: 16 }}>
           <SafetyPanel safety={safetyStatus} positions={positions} sendCommand={sendCommand} instrumentsData={status?.instruments || {}} />
+        </div>
+      )}
+
+      {/* Portfolio context / loss day messaging */}
+      {safetyStatus && (
+        <div style={{ marginBottom: 16 }}>
+          <ContextPanel safety={safetyStatus} />
         </div>
       )}
 

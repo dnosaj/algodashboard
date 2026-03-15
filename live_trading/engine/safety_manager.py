@@ -15,7 +15,7 @@ import logging
 import math
 from collections import deque
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Optional
 from zoneinfo import ZoneInfo
@@ -72,6 +72,14 @@ class SafetyManager:
         self._consecutive_losses: int = 0
         self._global_daily_pnl: float = 0.0
         self._global_trade_count: int = 0
+
+        # Portfolio context — for loss day messaging (observation only)
+        self._weekly_pnl: float = 0.0
+        self._monthly_pnl: float = 0.0
+        self._loss_days_this_month: int = 0
+        self._equity_peak: float = 0.0
+        self._cumulative_pnl: float = 0.0
+        self._today_date: date | None = None
 
         # Per-instrument heartbeat (wall clock of last bar processed)
         self._last_bar_time: dict[str, datetime] = {}
@@ -1008,6 +1016,13 @@ class SafetyManager:
         if not trade.is_partial:
             self._global_trade_count += 1
 
+        # Portfolio context accumulators (loss day messaging)
+        self._weekly_pnl += adjusted_pnl
+        self._monthly_pnl += adjusted_pnl
+        self._cumulative_pnl += adjusted_pnl
+        if self._cumulative_pnl > self._equity_peak:
+            self._equity_peak = self._cumulative_pnl
+
         # Consecutive losses: skip partial trades entirely (TP1 is always a winner
         # but resetting prematurely could mask a losing streak; don't count as loss either)
         if not trade.is_partial:
@@ -1360,6 +1375,20 @@ class SafetyManager:
         4. Reset per-strategy counters (sees correct _extended_pause state)
         5. Reset global counters
         """
+        # 0. Portfolio context — count loss day, reset week/month boundaries
+        if self._global_daily_pnl < 0 and self._today_date is not None:
+            self._loss_days_this_month += 1
+        today = datetime.now(_ET).date()
+        if self._today_date is not None:
+            # New week (Monday) — reset weekly P&L
+            if today.isocalendar()[1] != self._today_date.isocalendar()[1]:
+                self._weekly_pnl = 0.0
+            # New month — reset monthly P&L and loss day counter
+            if today.month != self._today_date.month:
+                self._monthly_pnl = 0.0
+                self._loss_days_this_month = 0
+        self._today_date = today
+
         # 1. Compute rolling BEFORE appending (history = past days, sl_count_today = today)
         rolling = self._rolling_sl_5d()
 
@@ -1616,6 +1645,28 @@ class SafetyManager:
                 ]
                 for inst, obs in self._active_obs.items()
                 if obs  # only include instruments with active OBs
+            },
+            "portfolio_context": {
+                "daily_pnl": round(self._global_daily_pnl, 2),
+                "weekly_pnl": round(self._weekly_pnl, 2),
+                "monthly_pnl": round(self._monthly_pnl, 2),
+                "cumulative_pnl": round(self._cumulative_pnl, 2),
+                "current_drawdown": round(self._equity_peak - self._cumulative_pnl, 2),
+                "equity_peak": round(self._equity_peak, 2),
+                "consecutive_losses": self._consecutive_losses,
+                "loss_days_this_month": self._loss_days_this_month,
+                "trade_count_today": self._global_trade_count,
+            },
+            "backtest_benchmarks": {
+                "max_drawdown": 1420,
+                "worst_streak": 5,
+                "expected_loss_day_rate": 0.15,
+                "strategy_wr": {
+                    "MNQ_V15": 0.856,
+                    "MNQ_VSCALPB": 0.749,
+                    "MNQ_VSCALPC": 0.780,
+                    "MES_V2": 0.620,
+                },
             },
             "strategies": strategies,
         }

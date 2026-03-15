@@ -179,6 +179,23 @@ export interface SafetyStatusData {
   strategies: Record<string, SafetyStrategyStatus>;
   ict_levels?: Record<string, ICTLevelData>;
   ob_zones?: Record<string, OBZone[]>;
+  portfolio_context?: {
+    daily_pnl: number;
+    weekly_pnl: number;
+    monthly_pnl: number;
+    cumulative_pnl: number;
+    current_drawdown: number;
+    equity_peak: number;
+    consecutive_losses: number;
+    loss_days_this_month: number;
+    trade_count_today: number;
+  };
+  backtest_benchmarks?: {
+    max_drawdown: number;
+    worst_streak: number;
+    expected_loss_day_rate: number;
+    strategy_wr: Record<string, number>;
+  };
 }
 
 export interface BlockedSignal {
