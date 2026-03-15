@@ -112,6 +112,9 @@ class TradeRecord:
     # Signal price for slippage analysis (bar.open at signal time)
     signal_price: Optional[float] = None
 
+    # ICT level proximity at entry (observation tags, not gates)
+    ict_near_levels: Optional[list[str]] = None
+
     # Source: "live", "paper", "backtest"
     source: str = "paper"
 

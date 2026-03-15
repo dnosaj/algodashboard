@@ -647,6 +647,10 @@ async def process_bar(
                 state.safety._leledc_bull_count.get(bar.instrument, 0),
                 state.safety._leledc_bear_count.get(bar.instrument, 0),
             )
+            # ICT level proximity at entry (observation only)
+            strategy.state.ict_near_levels = state.safety.get_ict_proximity(
+                bar.instrument, bar.open
+            ) or None  # Store None instead of empty list
 
         # If ALL protection failed (OCO + fallback stop), halt the engine
         if hasattr(state.order_manager, 'pop_protection_failures'):

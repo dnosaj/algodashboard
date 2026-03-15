@@ -265,6 +265,8 @@ class DbLogger:
             "trade_group_id": getattr(trade, 'trade_group_id', None),
             "signal_price": getattr(trade, 'signal_price', None),
             "config_id": self._config_id_map.get(trade.strategy_id),
+            # ICT level proximity at entry
+            "ict_near_levels": getattr(trade, 'ict_near_levels', None),
         }
         # Strip None values to let DB defaults apply
         return {k: v for k, v in row.items() if v is not None}

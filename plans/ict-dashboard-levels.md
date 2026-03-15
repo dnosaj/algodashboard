@@ -79,6 +79,12 @@ vScalpA is inconsistent across IS/OOS. Gate blocks very few trades (~1-2/month).
 
 **CRITICAL CONSTRAINT**: ICT levels are OBSERVATION ONLY. Never enter `check_can_trade()`. No `_gate_` variable naming. Comment block at top of section.
 
+**Persistence**: Weekly accumulator raw data (closes+volumes lists), computed wPOC/wVAL, and active OB zones all persisted in gate_state.json. Mid-week restart must not lose accumulated data.
+
+**OB lifecycle**: OBs persist until mitigated. No weekly/daily reset. Max 2 per direction per instrument — FIFO eviction when new OB detected.
+
+**Trade tagging timing**: Capture ICT proximity at ENTRY TIME (in `_open_position`), not at trade close. OBs may be mitigated during the trade — the entry-time context is what matters. Follow `gate_leledc_active` pattern.
+
 ### Trade tagging (~20 lines across runner.py, events.py, strategy.py, db_logger.py)
 
 - At trade entry: runner.py calls `safety.get_ict_proximity()`, stamps on TradeState
@@ -113,8 +119,6 @@ vScalpA is inconsistent across IS/OOS. Gate blocks very few trades (~1-2/month).
 ```sql
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS ict_near_levels text[];
 CREATE INDEX IF NOT EXISTS idx_trades_ict_levels ON trades USING GIN (ict_near_levels);
-ALTER TABLE gate_state_snapshots ADD COLUMN IF NOT EXISTS london_high double precision;
-ALTER TABLE gate_state_snapshots ADD COLUMN IF NOT EXISTS london_low double precision;
 ALTER TABLE gate_state_snapshots ADD COLUMN IF NOT EXISTS weekly_vpoc double precision;
 ALTER TABLE gate_state_snapshots ADD COLUMN IF NOT EXISTS weekly_val double precision;
 ```
@@ -140,7 +144,8 @@ ALTER TABLE gate_state_snapshots ADD COLUMN IF NOT EXISTS weekly_val double prec
 | MNQ + MES both get levels | Display costs nothing. Gate would be MNQ-only (MES has its own daily gate). |
 | Labels: "wPOC" not "VPOC" | Avoid confusion with existing prior-day VPOC on MES. |
 | Chart-header toggle (like PPST) | Not SafetyPanel — these don't affect execution. |
-| Warmup bars: increase to 720 | Ensures London session coverage on cold start. |
+| Weekly VPOC warmup via gate_state.json | No warmup bar increase needed — persistence handles it. Cold start = fail-open until Monday. |
+| OB rendering: two price lines per zone | Phase 1 uses createPriceLine for zone top/bottom/mid. Defer rectangle plugins. |
 
 ## Total scope
 

@@ -545,7 +545,7 @@ def create_app(handle: EngineHandle) -> FastAPI:
             if t.exit_time:
                 et = t.exit_time.astimezone(_ET)
                 exit_et_epoch = int(t.exit_time.timestamp()) + int(et.utcoffset().total_seconds())
-            result.append({
+            trade_dict = {
                 "instrument": t.instrument,
                 "strategy_id": t.strategy_id,
                 "side": t.side.upper(),
@@ -561,7 +561,10 @@ def create_app(handle: EngineHandle) -> FastAPI:
                 "bars_held": t.bars_held,
                 "qty": t.qty,
                 "is_partial": t.is_partial,
-            })
+            }
+            if getattr(t, 'ict_near_levels', None):
+                trade_dict["ict_near_levels"] = t.ict_near_levels
+            result.append(trade_dict)
         return result
 
     # --- Historical daily P&L cache ---

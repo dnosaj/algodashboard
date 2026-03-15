@@ -416,6 +416,8 @@ class TradeState:
     gate_leledc_count: Optional[int] = None
     # Trade group ID (links partial + runner legs)
     trade_group_id: Optional[str] = None
+    # ICT level proximity at entry (observation tags, not gates)
+    ict_near_levels: Optional[list[str]] = None
 
 
 class IncrementalStrategy:
@@ -777,6 +779,8 @@ class IncrementalStrategy:
             gate_atr_value=self.state.gate_atr_value,
             gate_adr_ratio=self.state.gate_adr_ratio,
             gate_leledc_count=self.state.gate_leledc_count,
+            # ICT levels at entry
+            ict_near_levels=self.state.ict_near_levels,
             # MFE/MAE
             mfe_pts=round(self.state.max_favorable, 2),
             mae_pts=round(self.state.min_adverse, 2),
@@ -854,6 +858,8 @@ class IncrementalStrategy:
             gate_atr_value=self.state.gate_atr_value,
             gate_adr_ratio=self.state.gate_adr_ratio,
             gate_leledc_count=self.state.gate_leledc_count,
+            # ICT levels at entry
+            ict_near_levels=self.state.ict_near_levels,
             # MFE/MAE
             mfe_pts=round(self.state.max_favorable, 2),
             mae_pts=round(self.state.min_adverse, 2),

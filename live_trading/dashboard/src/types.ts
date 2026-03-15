@@ -47,6 +47,7 @@ export interface Trade {
   mae?: number;
   qty?: number;
   is_partial?: boolean;
+  ict_near_levels?: string[];
 }
 
 export interface BarData {
@@ -136,6 +137,19 @@ export interface SafetyStrategyStatus {
   adr_dir_ratio: number | null;
 }
 
+export interface ICTLevelData {
+  weekly_vpoc: number | null;
+  weekly_val: number | null;
+  vpoc_strength: number;  // 0-1, for conviction opacity
+}
+
+export interface OBZone {
+  top: number;
+  bottom: number;
+  is_bull: boolean;
+  midline: number;
+}
+
 export interface SafetyStatusData {
   halted: boolean;
   halt_reason: string;
@@ -160,6 +174,8 @@ export interface SafetyStatusData {
   prior_day_atr: Record<string, number | null>;
   adr: Record<string, number | null>;
   strategies: Record<string, SafetyStrategyStatus>;
+  ict_levels?: Record<string, ICTLevelData>;
+  ob_zones?: Record<string, OBZone[]>;
 }
 
 export interface BlockedSignal {

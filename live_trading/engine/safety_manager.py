@@ -13,6 +13,7 @@ Replaces the inline SafetyManager from runner.py with:
 import json
 import logging
 import math
+from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -164,6 +165,28 @@ class SafetyManager:
         self._or_finalized: dict[str, bool] = {}
         self._OR_END_ET = 630  # 10:30 ET in minutes from midnight
 
+        # ------------------------------------------------------------------
+        # ICT dashboard levels — OBSERVATION ONLY (never enters check_can_trade)
+        # ------------------------------------------------------------------
+
+        # Weekly VPOC/VAL: accumulate RTH closes+volumes Mon-Fri, compute on Monday
+        self._weekly_rth_closes: dict[str, list[float]] = {}
+        self._weekly_rth_volumes: dict[str, list[float]] = {}
+        self._weekly_vpoc: dict[str, float | None] = {}
+        self._weekly_val: dict[str, float | None] = {}
+        self._weekly_vpoc_strength: dict[str, float] = {}  # max_bin_vol / total_vol
+        # Bin width per instrument for weekly volume profile
+        self._weekly_bin_width: dict[str, float] = {}
+        for s in config.strategies:
+            inst = s.instrument
+            if inst not in self._weekly_bin_width:
+                self._weekly_bin_width[inst] = 2.0 if "MNQ" in inst else 5.0
+
+        # Order Block tracking (UAlgo 3-bar engulfing pattern)
+        # OBs persist until mitigated — no daily/weekly reset
+        self._active_obs: dict[str, list[dict]] = {}  # per instrument, active OB zones
+        self._ob_bar_history: dict[str, deque] = {}    # last 3 bars of OHLC per instrument
+
         # Load gate seed from pre-computed file (if available)
         self._load_gate_seed()
 
@@ -289,6 +312,32 @@ class SafetyManager:
                     f"bear={bear_count}, gate={'BLOCKED' if exhausted else 'OPEN'}"
                 )
 
+            # --- ICT: Weekly VPOC/VAL ---
+            if "weekly_rth_closes" in data:
+                self._weekly_rth_closes[inst] = data["weekly_rth_closes"]
+                self._weekly_rth_volumes[inst] = data.get("weekly_rth_volumes", [])
+            if "weekly_vpoc" in data:
+                self._weekly_vpoc[inst] = data["weekly_vpoc"]
+            if "weekly_val" in data:
+                self._weekly_val[inst] = data["weekly_val"]
+            if "weekly_vpoc_strength" in data:
+                self._weekly_vpoc_strength[inst] = data["weekly_vpoc_strength"]
+            if self._weekly_vpoc.get(inst) is not None:
+                logger.info(
+                    f"[Safety] Weekly VPOC seed for {inst}: "
+                    f"VPOC={self._weekly_vpoc[inst]}, VAL={self._weekly_val.get(inst)}, "
+                    f"strength={self._weekly_vpoc_strength.get(inst, 0)}"
+                )
+
+            # --- ICT: Active Order Blocks ---
+            if "active_obs" in data:
+                self._active_obs[inst] = data["active_obs"]
+                if not self._ob_bar_history.get(inst):
+                    self._ob_bar_history[inst] = deque(maxlen=3)
+                logger.info(
+                    f"[Safety] OB seed for {inst}: {len(data['active_obs'])} active OBs"
+                )
+
         logger.info(f"[Safety] Gate data loaded from {source}")
 
     def _save_gate_state(self) -> None:
@@ -305,6 +354,9 @@ class SafetyManager:
         instruments.update(self._atr_daily_ranges.keys())
         instruments.update(self._prior_day_levels.keys())
         instruments.update(self._leledc_closes.keys())
+        instruments.update(self._weekly_rth_closes.keys())
+        instruments.update(self._active_obs.keys())
+        instruments.update(self._weekly_vpoc.keys())
 
         for inst in instruments:
             d: dict = {}
@@ -327,6 +379,21 @@ class SafetyManager:
 
             session = self._adr_rth_session.get(inst, {})
             d["last_rth_date"] = str(session.get("date", "")) if session.get("date") else None
+
+            # ICT: weekly VPOC/VAL accumulators + computed levels
+            if inst in self._weekly_rth_closes and self._weekly_rth_closes[inst]:
+                d["weekly_rth_closes"] = [round(c, 2) for c in self._weekly_rth_closes[inst]]
+                d["weekly_rth_volumes"] = [round(v, 2) for v in self._weekly_rth_volumes.get(inst, [])]
+            if self._weekly_vpoc.get(inst) is not None:
+                d["weekly_vpoc"] = round(self._weekly_vpoc[inst], 2)
+            if self._weekly_val.get(inst) is not None:
+                d["weekly_val"] = round(self._weekly_val[inst], 2)
+            if self._weekly_vpoc_strength.get(inst):
+                d["weekly_vpoc_strength"] = self._weekly_vpoc_strength[inst]
+
+            # ICT: active order blocks
+            if inst in self._active_obs and self._active_obs[inst]:
+                d["active_obs"] = self._active_obs[inst]
 
             state[inst] = d
 
@@ -368,7 +435,7 @@ class SafetyManager:
         self._update_prior_day_atr(bar)
         self._update_adr_directional(bar)
 
-        # VWAP + Opening Range accumulation (RTH only)
+        # VWAP + Opening Range + Weekly VPOC accumulation (RTH only)
         bar_et = bar.timestamp.astimezone(_ET)
         et_mins = bar_et.hour * 60 + bar_et.minute
         if self._RTH_OPEN_ET <= et_mins < self._RTH_CLOSE_ET:
@@ -387,6 +454,17 @@ class SafetyManager:
                     self._or_low[inst] = min(self._or_low[inst], bar.low)
             elif et_mins >= self._OR_END_ET and not self._or_finalized.get(inst, False):
                 self._or_finalized[inst] = True
+
+            # Weekly VPOC/VAL: accumulate RTH closes + volumes for volume profile
+            if inst in self._weekly_bin_width:
+                if inst not in self._weekly_rth_closes:
+                    self._weekly_rth_closes[inst] = []
+                    self._weekly_rth_volumes[inst] = []
+                self._weekly_rth_closes[inst].append(bar.close)
+                self._weekly_rth_volumes[inst].append(bar.volume)
+
+        # Order Block tracking (all bars, not just RTH)
+        self._update_order_blocks(bar)
 
     # ------------------------------------------------------------------
     # Entry gate update methods (called from on_bar, deduplicated)
@@ -627,6 +705,108 @@ class SafetyManager:
             self._adr_dir_ratio_current[inst] = move / adr_val
         else:
             self._adr_dir_ratio_current[inst] = 0.0  # fail-open
+
+    # ------------------------------------------------------------------
+    # ICT Order Block tracking (OBSERVATION ONLY — never enters check_can_trade)
+    # ------------------------------------------------------------------
+
+    _MAX_OBS_PER_DIRECTION = 2
+
+    def _update_order_blocks(self, bar: Bar) -> None:
+        """Incremental OB detection using UAlgo 3-bar engulfing pattern.
+
+        Appends bar OHLC to a 3-bar deque per instrument. When 3 bars are
+        available, checks for bullish/bearish OB formation. Also checks
+        mitigation of existing OBs (remove when close passes through zone).
+
+        OBs persist until mitigated — no daily or weekly reset.
+        Max 2 per direction per instrument (FIFO eviction).
+        """
+        inst = bar.instrument
+        if inst not in self._ob_bar_history:
+            self._ob_bar_history[inst] = deque(maxlen=3)
+            self._active_obs[inst] = []
+
+        self._ob_bar_history[inst].append({
+            "o": bar.open, "h": bar.high, "l": bar.low, "c": bar.close,
+        })
+
+        # Mitigate existing OBs: remove if close passes through zone
+        surviving = []
+        for ob in self._active_obs[inst]:
+            if ob["is_bull"] and bar.close < ob["bottom"]:
+                continue  # Bullish OB mitigated — close below zone
+            if not ob["is_bull"] and bar.close > ob["top"]:
+                continue  # Bearish OB mitigated — close above zone
+            surviving.append(ob)
+        self._active_obs[inst] = surviving
+
+        # Need 3 bars for detection
+        hist = self._ob_bar_history[inst]
+        if len(hist) < 3:
+            return
+
+        b0, b1, b2 = hist[0], hist[1], hist[2]  # oldest to newest
+
+        # Bullish OB: b0 bearish, b1 bullish engulfing (sweeps below b0 low),
+        # b2 confirms (bullish, closes above b1 high)
+        is_bull_ob = (
+            b0["o"] > b0["c"]          # bar[0] bearish
+            and b1["c"] > b1["o"]      # bar[1] bullish
+            and b2["c"] > b2["o"]      # bar[2] bullish (confirms)
+            and b1["l"] < b0["l"]      # sweeps below
+            and b2["c"] > b1["h"]      # displacement up
+        )
+
+        # Bearish OB: b0 bullish, b1 bearish engulfing (sweeps above b0 high),
+        # b2 confirms (bearish, closes below b1 low)
+        is_bear_ob = (
+            b0["o"] < b0["c"]          # bar[0] bullish
+            and b1["c"] < b1["o"]      # bar[1] bearish
+            and b2["c"] < b2["o"]      # bar[2] bearish (confirms)
+            and b1["h"] > b0["h"]      # sweeps above
+            and b2["c"] < b1["l"]      # displacement down
+        )
+
+        if is_bull_ob:
+            self._add_ob(inst, is_bull=True, bottom=b1["l"], top=b1["h"])
+
+        if is_bear_ob:
+            self._add_ob(inst, is_bull=False, bottom=b1["l"], top=b1["h"])
+
+    def _add_ob(self, inst: str, is_bull: bool, bottom: float, top: float) -> None:
+        """Add an OB zone with FIFO eviction (max 2 per direction)."""
+        obs = self._active_obs.setdefault(inst, [])
+        same_dir = [ob for ob in obs if ob["is_bull"] == is_bull]
+        while len(same_dir) >= self._MAX_OBS_PER_DIRECTION:
+            # Evict oldest (FIFO)
+            oldest = same_dir.pop(0)
+            obs.remove(oldest)
+            same_dir = [ob for ob in obs if ob["is_bull"] == is_bull]
+
+        obs.append({
+            "is_bull": is_bull,
+            "bottom": round(bottom, 2),
+            "top": round(top, 2),
+        })
+
+    def get_ict_proximity(self, inst: str, price: float) -> list[str]:
+        """Return list of ICT level tags near the given price. Observation only.
+
+        Called at trade entry time to tag trades with nearby ICT levels.
+        Threshold: 10 pts for weekly levels, inside zone for OBs.
+        """
+        tags = []
+        vpoc = self._weekly_vpoc.get(inst)
+        if vpoc is not None and abs(price - vpoc) <= 10:
+            tags.append("wPOC")
+        val = self._weekly_val.get(inst)
+        if val is not None and abs(price - val) <= 10:
+            tags.append("wVAL")
+        for ob in self._active_obs.get(inst, []):
+            if ob["bottom"] <= price <= ob["top"]:
+                tags.append("BULL_OB" if ob["is_bull"] else "BEAR_OB")
+        return tags
 
     def _finalize_prior_day(self, inst: str) -> None:
         """Compute prior-day levels from collected RTH data and reset tracking."""
@@ -1164,6 +1344,43 @@ class SafetyManager:
         self._or_low.clear()
         self._or_finalized.clear()
 
+        # 6b. Weekly VPOC/VAL: on Monday, compute from prior week's accumulated data
+        now_et = datetime.now(_ET)
+        if now_et.weekday() == 0:  # Monday
+            for inst in list(self._weekly_rth_closes.keys()):
+                closes = self._weekly_rth_closes.get(inst, [])
+                volumes = self._weekly_rth_volumes.get(inst, [])
+                if closes and volumes:
+                    bw = self._weekly_bin_width.get(inst, 5.0)
+                    profile = self._compute_value_area(closes, volumes, bin_width=bw)
+                    if profile is not None:
+                        vpoc, _vah, val = profile
+                        self._weekly_vpoc[inst] = vpoc
+                        self._weekly_val[inst] = val
+                        # Compute VPOC strength (conviction opacity)
+                        total_vol = sum(volumes)
+                        if total_vol > 0:
+                            price_min = math.floor(min(closes) / bw) * bw
+                            price_max = math.ceil(max(closes) / bw) * bw
+                            if price_min == price_max:
+                                price_max = price_min + bw
+                            n_bins = int(round((price_max - price_min) / bw)) + 1
+                            bin_vols = [0.0] * n_bins
+                            for c, v in zip(closes, volumes):
+                                idx = int(round((c - price_min) / bw))
+                                idx = min(max(idx, 0), n_bins - 1)
+                                bin_vols[idx] += v
+                            max_bin = max(bin_vols)
+                            self._weekly_vpoc_strength[inst] = round(max_bin / total_vol, 4)
+                        logger.info(
+                            f"[Safety] Weekly VPOC for {inst}: {vpoc:.2f}, "
+                            f"VAL: {val:.2f}, strength: {self._weekly_vpoc_strength.get(inst, 0)}"
+                        )
+                # Clear accumulators for new week
+                self._weekly_rth_closes[inst] = []
+                self._weekly_rth_volumes[inst] = []
+        # Note: OBs are NOT reset — they persist until mitigated
+
         # 7. Persist gate state for next startup
         self._save_gate_state()
 
@@ -1299,6 +1516,27 @@ class SafetyManager:
             "adr": {
                 inst: round(adr, 1) if adr is not None else None
                 for inst, adr in self._adr_value.items()
+            },
+            "ict_levels": {
+                inst: {
+                    "weekly_vpoc": round(self._weekly_vpoc[inst], 2) if self._weekly_vpoc.get(inst) is not None else None,
+                    "weekly_val": round(self._weekly_val[inst], 2) if self._weekly_val.get(inst) is not None else None,
+                    "vpoc_strength": self._weekly_vpoc_strength.get(inst, 0),
+                }
+                for inst in self._weekly_bin_width
+            },
+            "ob_zones": {
+                inst: [
+                    {
+                        "is_bull": ob["is_bull"],
+                        "bottom": ob["bottom"],
+                        "top": ob["top"],
+                        "midline": round((ob["bottom"] + ob["top"]) / 2, 2),
+                    }
+                    for ob in obs
+                ]
+                for inst, obs in self._active_obs.items()
+                if obs  # only include instruments with active OBs
             },
             "strategies": strategies,
         }

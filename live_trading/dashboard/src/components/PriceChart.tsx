@@ -189,6 +189,10 @@ export function PriceChart({ bars, trades, instrument, safetyStatus, blockedSign
   // Structure level overlay state
   const [structEnabled, setStructEnabled] = useState(false);
   const structLineRefs = useRef<IPriceLine[]>([]);
+  // ICT level overlay state
+  const [ictEnabled, setIctEnabled] = useState(true);
+  const ictLineRefs = useRef<IPriceLine[]>([]);
+  const obLineRefs = useRef<IPriceLine[]>([]);
   const [ppstPivotPeriod, setPpstPivotPeriod] = useState(3);
   const [ppstAtrFactor, setPpstAtrFactor] = useState(2);
   const [ppstAtrPeriod, setPpstAtrPeriod] = useState(6);
@@ -613,6 +617,107 @@ export function PriceChart({ bars, trades, instrument, safetyStatus, blockedSign
     }
   }, [structEnabled, instrumentsData, instrument]);
 
+  // ICT weekly level price lines (wPOC, wVAL)
+  useEffect(() => {
+    if (!seriesRef.current) return;
+
+    // Remove old ICT lines
+    for (const line of ictLineRefs.current) {
+      try { seriesRef.current.removePriceLine(line); } catch { /* already removed */ }
+    }
+    ictLineRefs.current = [];
+
+    if (!ictEnabled) return;
+
+    const levels = safetyStatus?.ict_levels?.[instrument];
+    if (!levels) return;
+
+    // Determine last price for proximity-based line style
+    const lastPrice = activeBars.length > 0 ? activeBars[activeBars.length - 1].close : null;
+
+    // Weekly VPOC — green, conviction-based thickness, solid when near / dashed when far
+    if (levels.weekly_vpoc != null) {
+      const nearVpoc = lastPrice != null && Math.abs(lastPrice - levels.weekly_vpoc) < 10;
+      const lineWidth = 1 + Math.round(levels.vpoc_strength * 2);
+      const line = seriesRef.current.createPriceLine({
+        price: levels.weekly_vpoc,
+        color: '#00cc66',
+        lineWidth: lineWidth as 1 | 2 | 3 | 4,
+        lineStyle: nearVpoc ? 0 : 2,  // Solid when near, Dashed when far
+        title: 'wPOC',
+        axisLabelVisible: true,
+      });
+      ictLineRefs.current.push(line);
+    }
+
+    // Weekly VAL — red, dashed
+    if (levels.weekly_val != null) {
+      const line = seriesRef.current.createPriceLine({
+        price: levels.weekly_val,
+        color: '#cc3333',
+        lineWidth: 1,
+        lineStyle: 2,
+        title: 'wVAL',
+        axisLabelVisible: true,
+      });
+      ictLineRefs.current.push(line);
+    }
+  }, [ictEnabled, safetyStatus?.ict_levels, instrument, activeBars]);
+
+  // ICT Order Block zone price lines
+  useEffect(() => {
+    if (!seriesRef.current) return;
+
+    // Remove old OB lines
+    for (const line of obLineRefs.current) {
+      try { seriesRef.current.removePriceLine(line); } catch { /* already removed */ }
+    }
+    obLineRefs.current = [];
+
+    if (!ictEnabled) return;
+
+    const zones = safetyStatus?.ob_zones?.[instrument];
+    if (!zones || zones.length === 0) return;
+
+    for (const ob of zones) {
+      const color = ob.is_bull ? '#00cc66' : '#cc3333';
+      const colorFaint = ob.is_bull ? '#00cc6644' : '#cc333344';
+
+      // Zone top
+      const topLine = seriesRef.current.createPriceLine({
+        price: ob.top,
+        color,
+        lineWidth: 1,
+        lineStyle: 0,  // Solid
+        title: 'OB',
+        axisLabelVisible: false,
+      });
+      obLineRefs.current.push(topLine);
+
+      // Zone bottom
+      const bottomLine = seriesRef.current.createPriceLine({
+        price: ob.bottom,
+        color,
+        lineWidth: 1,
+        lineStyle: 0,  // Solid
+        title: '',
+        axisLabelVisible: false,
+      });
+      obLineRefs.current.push(bottomLine);
+
+      // Midline (dotted)
+      const midLine = seriesRef.current.createPriceLine({
+        price: ob.midline,
+        color: colorFaint,
+        lineWidth: 1,
+        lineStyle: 3,  // Dotted
+        title: '',
+        axisLabelVisible: false,
+      });
+      obLineRefs.current.push(midLine);
+    }
+  }, [ictEnabled, safetyStatus?.ob_zones, instrument]);
+
   return (
     <div
       style={{
@@ -680,6 +785,17 @@ export function PriceChart({ bars, trades, instrument, safetyStatus, blockedSign
             {activeBars.length} bars
             {activeTrades.length > 0 && ` / ${activeTrades.length} trades`}
           </span>
+
+          {/* ICT levels toggle */}
+          <button
+            style={{
+              ...btnStyle(ictEnabled),
+              ...(ictEnabled ? { color: '#00cc66', borderColor: '#00cc6644' } : {}),
+            }}
+            onClick={() => setIctEnabled((v) => !v)}
+          >
+            ICT
+          </button>
 
           {/* Structure levels toggle */}
           <button
