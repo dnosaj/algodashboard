@@ -257,6 +257,7 @@ MNQ_RSI_TL = StrategyConfig(
     partial_qty=1,
     move_sl_to_be_after_tp1=True,
     max_strategy_daily_loss=200.0,
+    session_start_et="09:30",       # Match backtest (9:30 AM, not 10:00 default)
     session_end_et="13:00",
     session_close_et="16:00",
 )
@@ -264,7 +265,7 @@ MNQ_RSI_TL = StrategyConfig(
 DEFAULT_CONFIG = EngineConfig(
     strategies=[
         MNQ_V15, MNQ_VSCALPB, MNQ_VSCALPC, MES_V2,
-        # MNQ_RSI_TL,  # RSI trendline breakout — paper trade, uncomment to enable
+        MNQ_RSI_TL,  # RSI trendline breakout — paper trading
     ],
     safety=SafetyConfig(paper_mode=True),
 )

@@ -437,6 +437,10 @@ class RsiTrendlineStrategy:
         # When True, intra-bar monitor owns TP/trail/SL exits; on_bar() skips them
         self.intrabar_monitor_active: bool = False
 
+        # Pending signals from previous bar (bar[i-1] convention)
+        self._pending_long: bool = False
+        self._pending_short: bool = False
+
     @property
     def strategy_id(self) -> str:
         return self.config.strategy_id or self.config.instrument
@@ -630,9 +634,9 @@ class RsiTrendlineStrategy:
 
             if in_session and cd_ok:
                 # Use PREVIOUS bar's break signals (stored from last on_bar call)
-                if hasattr(self, '_pending_long') and self._pending_long:
+                if self._pending_long:
                     signal = self._open_position(bar, "long", rsi_val)
-                elif hasattr(self, '_pending_short') and self._pending_short:
+                elif self._pending_short:
                     signal = self._open_position(bar, "short", rsi_val)
 
         # Store this bar's break results for next bar's entry check

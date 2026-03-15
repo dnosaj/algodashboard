@@ -1255,8 +1255,8 @@ def _build_engine_handle(state: EngineState) -> EngineHandle:
                 "breakeven_after_bars": strat.config.breakeven_after_bars,
                 "exit_mode": strat.config.exit_mode,
                 "tp_pts": strat.config.tp_pts,
-                "long_used": strat.state.long_used,
-                "short_used": strat.state.short_used,
+                "long_used": getattr(strat.state, 'long_used', False),
+                "short_used": getattr(strat.state, 'short_used', False),
             }
 
             # Add structure exit level info if monitor exists
