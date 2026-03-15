@@ -164,9 +164,8 @@ MNQ_VSCALPB = StrategyConfig(
     cooldown=20, max_loss_pts=10,  # Upgraded from 15: tighter SL matches tighter TP
     dollar_per_pt=2.0,
     max_strategy_daily_loss=100.0,
-    leledc_maj_qual=9,  # Block entry on Leledc exhaustion (9+ consecutive directional closes)
-    adr_lookback_days=14,             # ADR directional gate: 14-day lookback
-    adr_directional_threshold=0.3,    # Block when move_from_open/ADR >= 0.3 in entry direction
+    # Gates REMOVED Mar 14: vScalpB is filter-resistant (SM_T=0.25 already filters).
+    # Leledc+ADR gates cost $483/yr (31% of P&L) for only +0.6pp WR. Blocked 109 winners vs 43 losers.
 )
 
 # MES v9.4 -- REPLACED by MES_V2 (TP=20 exit). Kept for reference.

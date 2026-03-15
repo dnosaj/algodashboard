@@ -1,0 +1,185 @@
+/Users/jasongeorge/Desktop/NQ trading/backtesting_engine/strategies/v10_test_common.py:249: RuntimeWarning: invalid value encountered in divide
+  rs = np.where(al > 0, ag / al, 100.0)
+/Users/jasongeorge/Desktop/NQ trading/backtesting_engine/strategies/v10_test_common.py:249: RuntimeWarning: invalid value encountered in divide
+  rs = np.where(al > 0, ag / al, 100.0)
+/Users/jasongeorge/Desktop/NQ trading/backtesting_engine/strategies/v10_test_common.py:200: RuntimeWarning: invalid value encountered in divide
+  rs = np.where(al > 0, ag / al, 100.0)
+/Users/jasongeorge/Desktop/NQ trading/backtesting_engine/strategies/v10_test_common.py:200: RuntimeWarning: invalid value encountered in divide
+  rs = np.where(al > 0, ag / al, 100.0)
+======================================================================
+ICT TRADE FORENSICS — Loading data and running portfolio
+======================================================================
+
+Loading MNQ data...
+  MNQ: 375211 bars, 2025-02-17 00:00:00 to 2026-03-12 23:59:00
+
+Loading MES data...
+  MES: 375746 bars, 2025-02-17 00:00:00 to 2026-03-12 23:59:00
+
+--- Computing Entry Gates ---
+  Computing Leledc exhaustion (mq=9)...
+  Computing ADR directional gate (14d, 0.3)...
+  Computing prior-day ATR gate (min=263.8)...
+  Computing VIX death zone gate (19-22)...
+  VIX death zone [19.0-22.0]: blocks 65222/375211 bars (17.4%)
+  Computing MES prior-day level gate (VPOC+VAL, buf=5)...
+  Computing swing levels for vScalpC structure exit...
+
+  Running vScalpA...
+    273 trades
+  Running vScalpB...
+    255 trades
+  Running vScalpC...
+    211 entries (422 legs)
+  Running MES v2...
+    384 trades
+
+  TOTAL: 1123 trades across 4 strategies
+
+--- Computing Weekly Volume Profile ---
+  MNQ: 368251 bars with weekly profile
+  MES: 368787 bars with weekly profile
+
+--- Computing Session Levels ---
+  MNQ Asia sessions: 374911 bars with levels
+  MNQ London sessions: 374611 bars with levels
+  MNQ Pre-NY sessions: 374341 bars with levels
+
+--- Computing ICT Features ---
+  Computing 1-min ICT features for MNQ...
+    OBs: 24931, FVGs: 74706, BOS/MSS: 39618, Sweeps: 41279
+  Computing 5-min ICT features for MNQ...
+    OBs: 5611, FVGs: 14581, BOS/MSS: 16064, Sweeps: 20419
+  Computing 1-min ICT features for MES...
+    OBs: 14823, FVGs: 67902, BOS/MSS: 36006, Sweeps: 26928
+  Computing 5-min ICT features for MES...
+    OBs: 4356, FVGs: 13837, BOS/MSS: 15337, Sweeps: 16802
+
+--- Mapping Trades to ICT Features ---
+  Mapped 1123 trades to ICT features
+
+================================================================================
+ICT TRADE FORENSICS — 12.8 months, 4 strategies, all gates applied
+================================================================================
+
+PORTFOLIO BASELINE: 1123 trades, WR 73.5%, PF 1.591, Net $+12,939.00
+
+--- 5-MIN ORDER BLOCKS ---
+  Long entries near bullish OB (<10pts)                      8 trades, WR  75.0% (+1.5pp), PF  0.690, Avg $ -14.18
+  Long entries near bearish OB (<10pts)                      6 trades, WR  33.3% (-40.2pp), PF  0.222, Avg $ -59.82
+  Short entries near bullish OB (<10pts)                     5 trades, WR  40.0% (-33.5pp), PF  0.123, Avg $ -46.00
+  Short entries near bearish OB (<10pts)                     3 trades, WR 100.0% (+26.5pp), PF 999.000, Avg $ +51.40
+  Entries inside any OB zone                                11 trades, WR  36.4% (-37.1pp), PF  0.076, Avg $ -86.93
+  Entries NOT near any OB (>10pts)                        1101 trades, WR  73.8% (+0.3pp), PF  1.649, Avg $ +12.25
+
+--- 5-MIN FAIR VALUE GAPS ---
+  Entries near FVG (<10pts, not inside)                      2 trades, WR 100.0% (+26.5pp), PF 999.000, Avg $ +62.50
+
+--- FIBONACCI / OTE (5-min structure) ---
+  Long in discount (bullish fib) = FAVORABLE                 8 trades, WR  37.5% (-36.0pp), PF  0.327, Avg $ -36.09
+  Long in premium (bullish fib) = UNFAVORABLE              412 trades, WR  76.7% (+3.2pp), PF  1.552, Avg $  +9.58
+  Short in premium (bearish fib) = FAVORABLE               319 trades, WR  70.5% (-3.0pp), PF  1.746, Avg $ +14.54
+  Short in discount (bearish fib) = UNFAVORABLE             13 trades, WR  53.8% (-19.7pp), PF  0.780, Avg $  -8.24
+  Entries in OTE zone (62-79% retrace)                      73 trades, WR  75.3% (+1.8pp), PF  1.777, Avg $ +18.72
+  Entries in OTE zone, ALIGNED with structure                7 trades, WR  42.9% (-30.6pp), PF  0.094, Avg $ -68.25
+
+--- LIQUIDITY SWEEPS (5-min) ---
+  Long within 5 bars of bullish sweep (5min)               217 trades, WR  76.0% (+2.5pp), PF  1.547, Avg $ +10.37
+  Short within 5 bars of bearish sweep (5min)              164 trades, WR  70.7% (-2.8pp), PF  2.112, Avg $ +19.77
+  Long within 10 bars of bullish sweep (5min)              236 trades, WR  76.7% (+3.2pp), PF  1.610, Avg $ +11.29
+  Short within 10 bars of bearish sweep (5min)             179 trades, WR  69.8% (-3.7pp), PF  1.992, Avg $ +18.55
+  Long within 20 bars of bullish sweep (5min)              242 trades, WR  76.4% (+2.9pp), PF  1.615, Avg $ +11.46
+  Short within 20 bars of bearish sweep (5min)             182 trades, WR  69.8% (-3.7pp), PF  1.989, Avg $ +18.28
+  No recent sweep (>20 bars, 5min)                           1 trades, WR   0.0% (-73.5pp), PF  0.000, Avg $ -28.75
+
+--- STRUCTURE STATE (5-min BOS/MSS) ---
+  Entry WITH 5-min trend (BOS continuation)                759 trades, WR  73.0% (-0.5pp), PF  1.521, Avg $ +10.16
+  Entry AGAINST 5-min trend                                364 trades, WR  74.5% (+1.0pp), PF  1.740, Avg $ +14.36
+  Entry within 10 bars of MSS (reversal)                    57 trades, WR  63.2% (-10.3pp), PF  1.053, Avg $  +1.61
+  Entry within 10 bars of BOS (continuation)               619 trades, WR  76.4% (+2.9pp), PF  1.808, Avg $ +14.57
+
+--- CONFLUENCE (5-min features aligned with trade direction) ---
+  0 features aligned                                       261 trades, WR  73.9% (+0.4pp), PF  1.560, Avg $ +11.19
+  1 features aligned                                       342 trades, WR  74.9% (+1.4pp), PF  1.742, Avg $ +12.75
+  2 features aligned                                       384 trades, WR  74.2% (+0.7pp), PF  1.462, Avg $  +9.80
+  3 features aligned                                       135 trades, WR  66.7% (-6.8pp), PF  1.704, Avg $ +13.72
+  4 features aligned                                         1 trades, WR 100.0% (+26.5pp), PF 999.000, Avg $ +41.25
+  2+ features aligned                                      520 trades, WR  72.3% (-1.2pp), PF  1.525, Avg $ +10.88
+  3+ features aligned                                      136 trades, WR  66.9% (-6.6pp), PF  1.720, Avg $ +13.92
+
+--- PER-STRATEGY BREAKDOWN ---
+
+  vScalpA: 273 trades, WR 85.3%, PF 1.598, Net $+2,171.58
+      With trend                                        190 trades, WR  85.8% (+0.5pp), PF  1.641
+      Against trend                                      83 trades, WR  84.3% (-1.0pp), PF  1.506
+      Confluence 2+                                     127 trades, WR  83.5% (-1.8pp), PF  1.451
+      In OTE zone                                        17 trades, WR  82.4% (-2.9pp), PF  1.282
+      Inside OB                                           4 trades, WR  25.0% (-60.3pp), PF  0.075
+
+  vScalpB: 255 trades, WR 74.1%, PF 1.470, Net $+1,053.30
+      With trend                                        163 trades, WR  72.4% (-1.7pp), PF  1.381
+      Against trend                                      92 trades, WR  77.2% (+3.1pp), PF  1.644
+      Confluence 2+                                     117 trades, WR  72.6% (-1.5pp), PF  1.435
+      In OTE zone                                        13 trades, WR  84.6% (+10.5pp), PF  1.847
+      Inside OB                                           1 trades, WR   0.0% (-74.1pp), PF  0.000
+
+  vScalpC: 211 trades, WR 79.6%, PF 1.941, Net $+5,111.62
+      With trend                                        147 trades, WR  77.6% (-2.0pp), PF  1.816
+      Against trend                                      64 trades, WR  84.4% (+4.8pp), PF  2.222
+      Confluence 2+                                      91 trades, WR  73.6% (-6.0pp), PF  1.502
+      In OTE zone                                        13 trades, WR  76.9% (-2.7pp), PF  1.377
+      Inside OB                                           4 trades, WR  25.0% (-54.6pp), PF  0.014
+
+  MES_v2: 384 trades, WR 61.2%, PF 1.435, Net $+4,602.50
+      With trend                                        259 trades, WR  61.4% (+0.2pp), PF  1.351
+      Against trend                                     125 trades, WR  60.8% (-0.4pp), PF  1.608
+      Confluence 2+                                     185 trades, WR  63.8% (+2.6pp), PF  1.589
+      In OTE zone                                        30 trades, WR  66.7% (+5.5pp), PF  2.254
+      Inside OB                                           2 trades, WR 100.0% (+38.8pp), PF 999.000
+
+--- SL CLUSTERING ---
+  Total SL trades: 154 / 1123 (13.7%)
+
+  Top structural contexts for SL trades (baseline SL rate: 13.7%):
+    1. Near opposing OB (<10pts, 5-min)              5/11 SL (45.5%, +31.7pp vs baseline)
+    2. Within 10 bars of MSS (reversal)              13/57 SL (22.8%, +9.1pp vs baseline)
+    3. Outside weekly value area                     116/809 SL (14.3%, +0.6pp vs baseline)
+    4. Zero ICT confluence                           37/261 SL (14.2%, +0.5pp vs baseline)
+    5. Sweep against entry direction                 32/226 SL (14.2%, +0.4pp vs baseline)
+    6. After session level sweep (10 bars)           69/496 SL (13.9%, +0.2pp vs baseline)
+    7. Sweep aligned with entry direction            37/270 SL (13.7%, -0.0pp vs baseline)
+    8. Entered AGAINST 5-min trend                   49/364 SL (13.5%, -0.3pp vs baseline)
+    9. In unfavorable fib zone (5-min)               55/425 SL (12.9%, -0.8pp vs baseline)
+    10. Near session H/L (<5pts)                      32/294 SL (10.9%, -2.8pp vs baseline)
+    11. Near weekly VPOC (<10pts)                     3/47 SL (6.4%, -7.3pp vs baseline)
+
+--- WEEKLY VOLUME PROFILE (PVP) ---
+  Entries inside weekly value area                         293 trades, WR  75.8% (+2.3pp), PF  2.076, Avg $ +16.82
+  Entries outside weekly value area                        809 trades, WR  72.8% (-0.7pp), PF  1.456, Avg $  +9.62
+  Entries near weekly VPOC (<10pts)                         47 trades, WR  68.1% (-5.4pp), PF  1.799, Avg $ +12.06
+  Entries near weekly VAH (<10pts)                          51 trades, WR  60.8% (-12.7pp), PF  1.709, Avg $ +10.03
+  Entries near weekly VAL (<10pts)                          18 trades, WR  50.0% (-23.5pp), PF  0.613, Avg $ -23.12
+  Long entries above weekly VAH (chasing?)                 332 trades, WR  76.5% (+3.0pp), PF  1.296, Avg $  +5.08
+  Short entries below weekly VAL (chasing?)                151 trades, WR  69.5% (-4.0pp), PF  1.552, Avg $ +16.90
+
+--- SESSION HIGHS/LOWS ---
+  Entries near Asia H/L (<5pts)                            127 trades, WR  65.4% (-8.1pp), PF  1.212, Avg $  +4.83
+  Entries near London H/L (<5pts)                          137 trades, WR  61.3% (-12.2pp), PF  0.924, Avg $  -2.21
+  Entries near pre-NY H/L (<5pts)                          166 trades, WR  64.5% (-9.0pp), PF  1.578, Avg $ +11.55
+  Entry after session sweep (within 10 bars)               496 trades, WR  72.4% (-1.1pp), PF  1.475, Avg $ +10.54
+  Bullish sweep of session low (within 10 bars)            283 trades, WR  71.7% (-1.8pp), PF  1.728, Avg $ +13.97
+  Bearish sweep of session high (within 10 bars)           295 trades, WR  72.5% (-1.0pp), PF  1.267, Avg $  +6.78
+  Entry direction aligned with sweep                       270 trades, WR  74.1% (+0.6pp), PF  1.555, Avg $ +11.33
+  Entry direction against sweep                            226 trades, WR  70.4% (-3.1pp), PF  1.395, Avg $  +9.58
+  Entries near ANY session H/L (<5pts)                     294 trades, WR  64.6% (-8.9pp), PF  1.185, Avg $  +4.60
+  Entries NOT near any session H/L (>5pts)                 829 trades, WR  76.6% (+3.1pp), PF  1.796, Avg $ +13.98
+
+--- 1-MIN vs 5-MIN COMPARISON (key metrics) ---
+   1MIN — With trend: 802 trades, WR 72.6%, PF 1.429
+   1MIN — Against:    321 trades, WR 75.7%, PF 2.078
+   5MIN — With trend: 759 trades, WR 73.0%, PF 1.521
+   5MIN — Against:    364 trades, WR 74.5%, PF 1.74
+
+================================================================================
+ICT Forensics complete.
+================================================================================

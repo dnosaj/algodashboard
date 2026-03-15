@@ -1,0 +1,284 @@
+================================================================================
+LONDON H/L GATE SWEEP
+  Gate: block when close within buffer_pts of London HIGH or LOW
+  London session: 02:00-05:00 ET (completed before RTH)
+  Sweep: buffer_pts = [3, 5, 7, 10]
+  Applied to: vScalpA + vScalpC (stacked on existing gates)
+  NOT applied to: vScalpB (ungated) + MES v2 (uses prior-day levels)
+================================================================================
+
+Loading MNQ data...
+  MNQ: 375211 bars, 2025-02-17 00:00:00 to 2026-03-12 23:59:00
+
+Loading MES data...
+  MES: 375746 bars, 2025-02-17 00:00:00 to 2026-03-12 23:59:00
+
+--- Computing Existing Entry Gates ---
+  Computing Leledc exhaustion (mq=9)...
+  Computing ADR directional gate (14d, 0.3)...
+  Computing prior-day ATR gate (min=263.8)...
+  Computing VIX death zone gate (19-22)...
+  Computing MES prior-day level gate (VPOC+VAL, buf=5)...
+
+--- Computing London Session Levels ---
+  374611/375211 bars have London H/L levels
+  Computing swing levels for vScalpC structure exit...
+
+================================================================================
+Buffer: None (baseline)
+================================================================================
+
+  --- FULL ---
+     vScalpA:  273 trades, WR  85.3%, PF  1.598, Sharpe  2.885, P&L $+2,171.58
+     vScalpB:  255 trades, WR  74.1%, PF  1.470, Sharpe  2.348, P&L $+1,053.30
+     vScalpC:  211 trades, WR  79.6%, PF  1.941, Sharpe  3.932, P&L $+5,111.62
+      MES_v2:  384 trades, WR  61.2%, PF  1.435, Sharpe  2.283, P&L $+4,602.50
+
+  --- IS ---
+     vScalpA:  139 trades, WR  84.2%, PF  1.528, Sharpe  2.643, P&L $+1,044.44
+     vScalpB:  133 trades, WR  71.4%, PF  1.382, Sharpe  1.958, P&L $  +494.18
+     vScalpC:  115 trades, WR  78.3%, PF  1.599, Sharpe  2.750, P&L $+1,935.30
+      MES_v2:  190 trades, WR  65.8%, PF  1.634, Sharpe  3.132, P&L $+3,276.25
+
+  --- OOS ---
+     vScalpA:  134 trades, WR  86.6%, PF  1.682, Sharpe  3.155, P&L $+1,127.14
+     vScalpB:  122 trades, WR  77.0%, PF  1.590, Sharpe  2.877, P&L $  +559.12
+     vScalpC:   96 trades, WR  81.2%, PF  2.443, Sharpe  5.366, P&L $+3,176.32
+      MES_v2:  193 trades, WR  56.5%, PF  1.241, Sharpe  1.352, P&L $+1,298.75
+
+================================================================================
+Buffer: buf=3
+================================================================================
+  London H/L gate (buf=3): blocks 13120/375211 bars (3.5%)
+
+  --- FULL ---
+     vScalpA:  271 trades, WR  85.2%, PF  1.594, Sharpe  2.878, P&L $+2,136.66
+     vScalpB:  255 trades, WR  74.1%, PF  1.470, Sharpe  2.348, P&L $+1,053.30
+     vScalpC:  210 trades, WR  80.0%, PF  2.040, Sharpe  4.240, P&L $+5,402.70
+      MES_v2:  384 trades, WR  61.2%, PF  1.435, Sharpe  2.283, P&L $+4,602.50
+
+  --- IS ---
+     vScalpA:  137 trades, WR  83.9%, PF  1.522, Sharpe  2.631, P&L $+1,012.52
+     vScalpB:  133 trades, WR  71.4%, PF  1.382, Sharpe  1.958, P&L $  +494.18
+     vScalpC:  114 trades, WR  78.9%, PF  1.722, Sharpe  3.191, P&L $+2,161.38
+      MES_v2:  190 trades, WR  65.8%, PF  1.634, Sharpe  3.132, P&L $+3,276.25
+
+  --- OOS ---
+     vScalpA:  134 trades, WR  86.6%, PF  1.680, Sharpe  3.148, P&L $+1,124.14
+     vScalpB:  122 trades, WR  77.0%, PF  1.590, Sharpe  2.877, P&L $  +559.12
+     vScalpC:   96 trades, WR  81.2%, PF  2.472, Sharpe  5.468, P&L $+3,241.32
+      MES_v2:  193 trades, WR  56.5%, PF  1.241, Sharpe  1.352, P&L $+1,298.75
+
+================================================================================
+Buffer: buf=5
+================================================================================
+  London H/L gate (buf=5): blocks 21266/375211 bars (5.7%)
+
+  --- FULL ---
+     vScalpA:  265 trades, WR  85.3%, PF  1.587, Sharpe  2.857, P&L $+2,096.40
+     vScalpB:  255 trades, WR  74.1%, PF  1.470, Sharpe  2.348, P&L $+1,053.30
+     vScalpC:  208 trades, WR  79.8%, PF  1.992, Sharpe  4.103, P&L $+5,206.86
+      MES_v2:  384 trades, WR  61.2%, PF  1.435, Sharpe  2.283, P&L $+4,602.50
+
+  --- IS ---
+     vScalpA:  133 trades, WR  83.5%, PF  1.479, Sharpe  2.457, P&L $  +933.68
+     vScalpB:  133 trades, WR  71.4%, PF  1.382, Sharpe  1.958, P&L $  +494.18
+     vScalpC:  113 trades, WR  77.9%, PF  1.610, Sharpe  2.803, P&L $+1,898.46
+      MES_v2:  190 trades, WR  65.8%, PF  1.634, Sharpe  3.132, P&L $+3,276.25
+
+  --- OOS ---
+     vScalpA:  132 trades, WR  87.1%, PF  1.718, Sharpe  3.291, P&L $+1,162.72
+     vScalpB:  122 trades, WR  77.0%, PF  1.590, Sharpe  2.877, P&L $  +559.12
+     vScalpC:   95 trades, WR  82.1%, PF  2.551, Sharpe  5.642, P&L $+3,308.40
+      MES_v2:  193 trades, WR  56.5%, PF  1.241, Sharpe  1.352, P&L $+1,298.75
+
+================================================================================
+Buffer: buf=7
+================================================================================
+  London H/L gate (buf=7): blocks 29440/375211 bars (7.8%)
+
+  --- FULL ---
+     vScalpA:  261 trades, WR  85.4%, PF  1.657, Sharpe  3.167, P&L $+2,233.56
+     vScalpB:  255 trades, WR  74.1%, PF  1.470, Sharpe  2.348, P&L $+1,053.30
+     vScalpC:  206 trades, WR  79.6%, PF  1.992, Sharpe  4.119, P&L $+5,207.02
+      MES_v2:  384 trades, WR  61.2%, PF  1.435, Sharpe  2.283, P&L $+4,602.50
+
+  --- IS ---
+     vScalpA:  130 trades, WR  83.1%, PF  1.455, Sharpe  2.364, P&L $  +887.80
+     vScalpB:  133 trades, WR  71.4%, PF  1.382, Sharpe  1.958, P&L $  +494.18
+     vScalpC:  111 trades, WR  77.5%, PF  1.615, Sharpe  2.846, P&L $+1,914.62
+      MES_v2:  190 trades, WR  65.8%, PF  1.634, Sharpe  3.132, P&L $+3,276.25
+
+  --- OOS ---
+     vScalpA:  131 trades, WR  87.8%, PF  1.929, Sharpe  4.112, P&L $+1,345.76
+     vScalpB:  122 trades, WR  77.0%, PF  1.590, Sharpe  2.877, P&L $  +559.12
+     vScalpC:   95 trades, WR  82.1%, PF  2.543, Sharpe  5.614, P&L $+3,292.40
+      MES_v2:  193 trades, WR  56.5%, PF  1.241, Sharpe  1.352, P&L $+1,298.75
+
+================================================================================
+Buffer: buf=10
+================================================================================
+  London H/L gate (buf=10): blocks 41881/375211 bars (11.2%)
+
+  --- FULL ---
+     vScalpA:  257 trades, WR  85.6%, PF  1.636, Sharpe  3.084, P&L $+2,153.72
+     vScalpB:  255 trades, WR  74.1%, PF  1.470, Sharpe  2.348, P&L $+1,053.30
+     vScalpC:  203 trades, WR  79.8%, PF  1.976, Sharpe  4.074, P&L $+5,093.26
+      MES_v2:  384 trades, WR  61.2%, PF  1.435, Sharpe  2.283, P&L $+4,602.50
+
+  --- IS ---
+     vScalpA:  128 trades, WR  83.6%, PF  1.444, Sharpe  2.314, P&L $  +860.38
+     vScalpB:  133 trades, WR  71.4%, PF  1.382, Sharpe  1.958, P&L $  +494.18
+     vScalpC:  109 trades, WR  78.0%, PF  1.595, Sharpe  2.775, P&L $+1,835.28
+      MES_v2:  190 trades, WR  65.8%, PF  1.634, Sharpe  3.132, P&L $+3,276.25
+
+  --- OOS ---
+     vScalpA:  129 trades, WR  87.6%, PF  1.893, Sharpe  3.987, P&L $+1,293.34
+     vScalpB:  122 trades, WR  77.0%, PF  1.590, Sharpe  2.877, P&L $  +559.12
+     vScalpC:   94 trades, WR  81.9%, PF  2.527, Sharpe  5.584, P&L $+3,257.98
+      MES_v2:  193 trades, WR  56.5%, PF  1.241, Sharpe  1.352, P&L $+1,298.75
+
+
+========================================================================================================================
+LONDON H/L GATE SWEEP — SUMMARY TABLE
+========================================================================================================================
+
+vScalpA (LONDON GATE APPLIED):
+    Buffer Split  Trades    WR%      PF  Sharpe       Net$    dPF%  Blocked
+  -------- ----- ------- ------ ------- ------- ---------- ------- --------
+      None  FULL     273  85.3%   1.598   2.885  +2,171.58   +0.0%        0
+      None    IS     139  84.2%   1.528   2.643  +1,044.44   +0.0%        0
+      None   OOS     134  86.6%   1.682   3.155  +1,127.14   +0.0%        0
+         3  FULL     271  85.2%   1.594   2.878  +2,136.66   -0.3%        2
+         3    IS     137  83.9%   1.522   2.631  +1,012.52   -0.4%        2
+         3   OOS     134  86.6%   1.680   3.148  +1,124.14   -0.1%        0
+         5  FULL     265  85.3%   1.587   2.857  +2,096.40   -0.7%        8
+         5    IS     133  83.5%   1.479   2.457    +933.68   -3.2%        6
+         5   OOS     132  87.1%   1.718   3.291  +1,162.72   +2.1%        2
+         7  FULL     261  85.4%   1.657   3.167  +2,233.56   +3.7%       12
+         7    IS     130  83.1%   1.455   2.364    +887.80   -4.8%        9
+         7   OOS     131  87.8%   1.929   4.112  +1,345.76  +14.7%        3
+        10  FULL     257  85.6%   1.636   3.084  +2,153.72   +2.4%       16
+        10    IS     128  83.6%   1.444   2.314    +860.38   -5.5%       11
+        10   OOS     129  87.6%   1.893   3.987  +1,293.34  +12.5%        5
+
+vScalpB (NO LONDON GATE):
+    Buffer Split  Trades    WR%      PF  Sharpe       Net$    dPF%  Blocked
+  -------- ----- ------- ------ ------- ------- ---------- ------- --------
+      None  FULL     255  74.1%   1.470   2.348  +1,053.30   +0.0%        0
+      None    IS     133  71.4%   1.382   1.958    +494.18   +0.0%        0
+      None   OOS     122  77.0%   1.590   2.877    +559.12   +0.0%        0
+         3  FULL     255  74.1%   1.470   2.348  +1,053.30   +0.0%        0
+         3    IS     133  71.4%   1.382   1.958    +494.18   +0.0%        0
+         3   OOS     122  77.0%   1.590   2.877    +559.12   +0.0%        0
+         5  FULL     255  74.1%   1.470   2.348  +1,053.30   +0.0%        0
+         5    IS     133  71.4%   1.382   1.958    +494.18   +0.0%        0
+         5   OOS     122  77.0%   1.590   2.877    +559.12   +0.0%        0
+         7  FULL     255  74.1%   1.470   2.348  +1,053.30   +0.0%        0
+         7    IS     133  71.4%   1.382   1.958    +494.18   +0.0%        0
+         7   OOS     122  77.0%   1.590   2.877    +559.12   +0.0%        0
+        10  FULL     255  74.1%   1.470   2.348  +1,053.30   +0.0%        0
+        10    IS     133  71.4%   1.382   1.958    +494.18   +0.0%        0
+        10   OOS     122  77.0%   1.590   2.877    +559.12   +0.0%        0
+
+vScalpC (LONDON GATE APPLIED):
+    Buffer Split  Trades    WR%      PF  Sharpe       Net$    dPF%  Blocked
+  -------- ----- ------- ------ ------- ------- ---------- ------- --------
+      None  FULL     211  79.6%   1.941   3.932  +5,111.62   +0.0%        0
+      None    IS     115  78.3%   1.599   2.750  +1,935.30   +0.0%        0
+      None   OOS      96  81.2%   2.443   5.366  +3,176.32   +0.0%        0
+         3  FULL     210  80.0%   2.040   4.240  +5,402.70   +5.1%        1
+         3    IS     114  78.9%   1.722   3.191  +2,161.38   +7.7%        1
+         3   OOS      96  81.2%   2.472   5.468  +3,241.32   +1.2%        0
+         5  FULL     208  79.8%   1.992   4.103  +5,206.86   +2.6%        3
+         5    IS     113  77.9%   1.610   2.803  +1,898.46   +0.7%        2
+         5   OOS      95  82.1%   2.551   5.642  +3,308.40   +4.4%        1
+         7  FULL     206  79.6%   1.992   4.119  +5,207.02   +2.6%        5
+         7    IS     111  77.5%   1.615   2.846  +1,914.62   +1.0%        4
+         7   OOS      95  82.1%   2.543   5.614  +3,292.40   +4.1%        1
+        10  FULL     203  79.8%   1.976   4.074  +5,093.26   +1.8%        8
+        10    IS     109  78.0%   1.595   2.775  +1,835.28   -0.3%        6
+        10   OOS      94  81.9%   2.527   5.584  +3,257.98   +3.4%        2
+
+MES_v2 (NO LONDON GATE):
+    Buffer Split  Trades    WR%      PF  Sharpe       Net$    dPF%  Blocked
+  -------- ----- ------- ------ ------- ------- ---------- ------- --------
+      None  FULL     384  61.2%   1.435   2.283  +4,602.50   +0.0%        0
+      None    IS     190  65.8%   1.634   3.132  +3,276.25   +0.0%        0
+      None   OOS     193  56.5%   1.241   1.352  +1,298.75   +0.0%        0
+         3  FULL     384  61.2%   1.435   2.283  +4,602.50   +0.0%        0
+         3    IS     190  65.8%   1.634   3.132  +3,276.25   +0.0%        0
+         3   OOS     193  56.5%   1.241   1.352  +1,298.75   +0.0%        0
+         5  FULL     384  61.2%   1.435   2.283  +4,602.50   +0.0%        0
+         5    IS     190  65.8%   1.634   3.132  +3,276.25   +0.0%        0
+         5   OOS     193  56.5%   1.241   1.352  +1,298.75   +0.0%        0
+         7  FULL     384  61.2%   1.435   2.283  +4,602.50   +0.0%        0
+         7    IS     190  65.8%   1.634   3.132  +3,276.25   +0.0%        0
+         7   OOS     193  56.5%   1.241   1.352  +1,298.75   +0.0%        0
+        10  FULL     384  61.2%   1.435   2.283  +4,602.50   +0.0%        0
+        10    IS     190  65.8%   1.634   3.132  +3,276.25   +0.0%        0
+        10   OOS     193  56.5%   1.241   1.352  +1,298.75   +0.0%        0
+
+
+================================================================================
+PER-STRATEGY VERDICTS
+================================================================================
+
+  Buffer = 3 pts:
+     vScalpA: PASS — meets thresholds
+     vScalpB: N/A (no London gate)
+     vScalpC: STRONG PASS — IS dPF +7.7%, OOS dPF +1.2%
+      MES_v2: N/A (no London gate)
+
+  Buffer = 5 pts:
+     vScalpA: PASS — meets thresholds
+     vScalpB: N/A (no London gate)
+     vScalpC: MARGINAL PASS — IS dPF +0.7%, OOS dPF +4.4%
+      MES_v2: N/A (no London gate)
+
+  Buffer = 7 pts:
+     vScalpA: PASS — meets thresholds
+     vScalpB: N/A (no London gate)
+     vScalpC: MARGINAL PASS — IS dPF +1.0%, OOS dPF +4.1%
+      MES_v2: N/A (no London gate)
+
+  Buffer = 10 pts:
+     vScalpA: FAIL — PF degrades (IS -5.5%, OOS +12.5%)
+     vScalpB: N/A (no London gate)
+     vScalpC: PASS — meets thresholds
+      MES_v2: N/A (no London gate)
+
+
+================================================================================
+PORTFOLIO AGGREGATE (A+B+C+MES)
+================================================================================
+    Buffer Split    TotalNet$  PortSharpe
+  -------- ----- ------------ -----------
+      None  FULL   +12,939.00       2.624
+      None    IS    +6,750.17       2.593
+      None   OOS    +6,161.33       2.651
+         3  FULL   +13,195.16       2.697
+         3    IS    +6,944.33       2.711
+         3   OOS    +6,223.33       2.674
+         5  FULL   +12,959.06       2.659
+         5    IS    +6,602.57       2.585
+         5   OOS    +6,328.99       2.732
+         7  FULL   +13,096.38       2.701
+         7    IS    +6,572.85       2.583
+         7   OOS    +6,496.03       2.825
+        10  FULL   +12,902.78       2.674
+        10    IS    +6,466.09       2.558
+        10   OOS    +6,409.19       2.796
+
+
+================================================================================
+GATE BLOCKING ANALYSIS
+================================================================================
+  Buffer 3: vScalpA blocks 2/273 entries (0.7%)
+  Buffer 3: vScalpC blocks 1/211 entries (0.5%)
+  Buffer 5: vScalpA blocks 8/273 entries (2.9%)
+  Buffer 5: vScalpC blocks 3/211 entries (1.4%)
+  Buffer 7: vScalpA blocks 12/273 entries (4.4%)
+  Buffer 7: vScalpC blocks 5/211 entries (2.4%)
+  Buffer 10: vScalpA blocks 16/273 entries (5.9%)
+  Buffer 10: vScalpC blocks 8/211 entries (3.8%)

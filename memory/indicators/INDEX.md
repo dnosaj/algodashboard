@@ -18,6 +18,8 @@ Each file contains source code, statistical analysis, fit assessment, and test r
 | Squeeze Momentum | `squeeze_momentum.md` | LazyBear | **Rejected** (Mar 6) | Entry gate | -- |
 | VWAP Deviation Z-Score | `vwap_deviation.md` | BackQuant | **Rejected** (Mar 6) | Entry gate | -- |
 | Initial Balance | `initial_balance.md` | PtGambler/LuxAlgo | **Tested** (passed, superseded) | Entry gate | Low |
+| ICT Concepts (SMC) | `ict_concepts.md` | LuxAlgo/UAlgo/Huddlestone | **Tested** (forensics) | OB gate candidate, London H/L gate | **HIGH** |
+| Periodic Volume Profile | `periodic_volume_profile.md` | TradingView built-in | **Tested** (forensics) | Weekly VAL gate candidate | Medium |
 | Z-Score Probability | `zscore_probability.md` | steversteves | **Untested** | Entry gate (extension) | Medium |
 | Fair Value Gap | `fair_value_gap.md` | LuxAlgo | **Untested** | Entry gate | Low |
 | Exhaustion Signal | `exhaustion_signal.md` | ChartingCycles | **Adopted** (via Leledc) | Entry gate | -- |
