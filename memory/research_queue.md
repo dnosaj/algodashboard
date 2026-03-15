@@ -7,7 +7,9 @@ Updated after each research session. Oldest items at bottom get dropped if not a
 
 | # | Hypothesis | Source | Effect Size | Sample | Strategies | Priority |
 |---|-----------|--------|-------------|--------|------------|----------|
-| 1 | **London H/L proximity gate**: Block entries within 3pts of London H/L (undirectional) | Gate sweep (Mar 14) | vScalpC STRONG PASS (IS +7.7%, OOS +1.2%). vScalpA inconsistent. | 137 forensic / ~5 blocked per sweep | vScalpC primarily | **Observation first** — display + tag, monitor before hard gate |
+| 1 | **Developing daily VPOC**: Show on chart + backtest against our entries. Is it a positive signal (like weekly VPOC) or negative? We track VWAP but NOT daily POC. | Jason (Mar 14) | Untested | -- | All strategies | **HIGH** — fundamental volume profile concept, never tested |
+| 2 | **Prior-day VPOC proximity for MNQ**: Do MNQ entries near prior-day VPOC also perform well (like weekly VPOC at 90.5% WR)? Already have the data, just never ran the analysis. | Mar 14 session | Untested | -- | MNQ strategies | **HIGH** — quick forensic addition |
+| 3 | **London H/L proximity gate**: Block entries within 3pts of London H/L (undirectional) | Gate sweep (Mar 14) | vScalpC STRONG PASS (IS +7.7%, OOS +1.2%). vScalpA inconsistent. | 137 forensic / ~5 blocked per sweep | vScalpC primarily | **Observation first** — display + tag, monitor before hard gate |
 | 2 | **Z-Score extension gate**: Block entries when Z-Score > threshold (e.g., 2.0) | Z-Score Probability indicator | Untested | -- | All MNQ (similar to ADR gate) | Medium |
 
 ## Monitor (promising signal, need more data or larger sample)
