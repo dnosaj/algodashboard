@@ -182,10 +182,14 @@ class SafetyManager:
             if inst not in self._weekly_bin_width:
                 self._weekly_bin_width[inst] = 2.0 if "MNQ" in inst else 5.0
 
-        # Order Block tracking (UAlgo 3-bar engulfing pattern)
+        # Order Block tracking (UAlgo 3-bar engulfing pattern on 5-MIN bars)
         # OBs persist until mitigated — no daily/weekly reset
+        # Detection runs on 5-min resampled bars (matching forensics validation).
+        # Mitigation runs on every 1-min bar (more responsive).
         self._active_obs: dict[str, list[dict]] = {}  # per instrument, active OB zones
-        self._ob_bar_history: dict[str, deque] = {}    # last 3 bars of OHLC per instrument
+        self._ob_5min_history: dict[str, deque] = {}   # last 3 completed 5-min bars per instrument
+        self._ob_5min_accum: dict[str, dict] = {}      # accumulating current 5-min bar per instrument
+        self._ob_5min_bar_count: dict[str, int] = {}   # 1-min bars accumulated in current 5-min bar
 
         # Load gate seed from pre-computed file (if available)
         self._load_gate_seed()
@@ -332,8 +336,10 @@ class SafetyManager:
             # --- ICT: Active Order Blocks ---
             if "active_obs" in data:
                 self._active_obs[inst] = data["active_obs"]
-                if not self._ob_bar_history.get(inst):
-                    self._ob_bar_history[inst] = deque(maxlen=3)
+                if not self._ob_5min_history.get(inst):
+                    self._ob_5min_history[inst] = deque(maxlen=3)
+                    self._ob_5min_accum[inst] = {}
+                    self._ob_5min_bar_count[inst] = 0
                 logger.info(
                     f"[Safety] OB seed for {inst}: {len(data['active_obs'])} active OBs"
                 )
@@ -463,8 +469,8 @@ class SafetyManager:
                 self._weekly_rth_closes[inst].append(bar.close)
                 self._weekly_rth_volumes[inst].append(bar.volume)
 
-        # Order Block tracking (all bars, not just RTH)
-        self._update_order_blocks(bar)
+        # Order Block tracking: accumulate 1-min into 5-min, detect on 5-min completion
+        self._update_order_blocks_5min(bar)
 
     # ------------------------------------------------------------------
     # Entry gate update methods (called from on_bar, deduplicated)
@@ -712,26 +718,24 @@ class SafetyManager:
 
     _MAX_OBS_PER_DIRECTION = 2
 
-    def _update_order_blocks(self, bar: Bar) -> None:
-        """Incremental OB detection using UAlgo 3-bar engulfing pattern.
+    def _update_order_blocks_5min(self, bar: Bar) -> None:
+        """Accumulate 1-min bars into 5-min bars, detect OBs on 5-min completion.
 
-        Appends bar OHLC to a 3-bar deque per instrument. When 3 bars are
-        available, checks for bullish/bearish OB formation. Also checks
-        mitigation of existing OBs (remove when close passes through zone).
+        Detection runs on 5-min resampled bars (matching forensics validation
+        that found -37pp WR on 5-min OBs). Mitigation runs on every 1-min bar
+        for responsiveness.
 
         OBs persist until mitigated — no daily or weekly reset.
         Max 2 per direction per instrument (FIFO eviction).
         """
         inst = bar.instrument
-        if inst not in self._ob_bar_history:
-            self._ob_bar_history[inst] = deque(maxlen=3)
+        if inst not in self._active_obs:
             self._active_obs[inst] = []
+            self._ob_5min_history[inst] = deque(maxlen=3)
+            self._ob_5min_accum[inst] = {}
+            self._ob_5min_bar_count[inst] = 0
 
-        self._ob_bar_history[inst].append({
-            "o": bar.open, "h": bar.high, "l": bar.low, "c": bar.close,
-        })
-
-        # Mitigate existing OBs: remove if close passes through zone
+        # --- Mitigate existing OBs on every 1-min bar (responsive) ---
         surviving = []
         for ob in self._active_obs[inst]:
             if ob["is_bull"] and bar.close < ob["bottom"]:
@@ -741,38 +745,55 @@ class SafetyManager:
             surviving.append(ob)
         self._active_obs[inst] = surviving
 
-        # Need 3 bars for detection
-        hist = self._ob_bar_history[inst]
-        if len(hist) < 3:
-            return
+        # --- Accumulate 1-min bars into 5-min bar ---
+        accum = self._ob_5min_accum[inst]
+        if not accum:
+            # Start new 5-min bar
+            accum["o"] = bar.open
+            accum["h"] = bar.high
+            accum["l"] = bar.low
+            accum["c"] = bar.close
+            self._ob_5min_bar_count[inst] = 1
+        else:
+            accum["h"] = max(accum["h"], bar.high)
+            accum["l"] = min(accum["l"], bar.low)
+            accum["c"] = bar.close
+            self._ob_5min_bar_count[inst] += 1
 
-        b0, b1, b2 = hist[0], hist[1], hist[2]  # oldest to newest
+        # Emit completed 5-min bar every 5 bars
+        if self._ob_5min_bar_count[inst] >= 5:
+            completed_bar = dict(accum)
+            self._ob_5min_history[inst].append(completed_bar)
+            self._ob_5min_accum[inst] = {}
+            self._ob_5min_bar_count[inst] = 0
 
-        # Bullish OB: b0 bearish, b1 bullish engulfing (sweeps below b0 low),
-        # b2 confirms (bullish, closes above b1 high)
-        is_bull_ob = (
-            b0["o"] > b0["c"]          # bar[0] bearish
-            and b1["c"] > b1["o"]      # bar[1] bullish
-            and b2["c"] > b2["o"]      # bar[2] bullish (confirms)
-            and b1["l"] < b0["l"]      # sweeps below
-            and b2["c"] > b1["h"]      # displacement up
-        )
+            # --- Detect OBs on completed 5-min bars ---
+            hist = self._ob_5min_history[inst]
+            if len(hist) >= 3:
+                b0, b1, b2 = hist[0], hist[1], hist[2]
 
-        # Bearish OB: b0 bullish, b1 bearish engulfing (sweeps above b0 high),
-        # b2 confirms (bearish, closes below b1 low)
-        is_bear_ob = (
-            b0["o"] < b0["c"]          # bar[0] bullish
-            and b1["c"] < b1["o"]      # bar[1] bearish
-            and b2["c"] < b2["o"]      # bar[2] bearish (confirms)
-            and b1["h"] > b0["h"]      # sweeps above
-            and b2["c"] < b1["l"]      # displacement down
-        )
+                # Bullish OB: b0 bearish, b1 bullish engulfing, b2 confirms
+                is_bull_ob = (
+                    b0["o"] > b0["c"]
+                    and b1["c"] > b1["o"]
+                    and b2["c"] > b2["o"]
+                    and b1["l"] < b0["l"]
+                    and b2["c"] > b1["h"]
+                )
 
-        if is_bull_ob:
-            self._add_ob(inst, is_bull=True, bottom=b1["l"], top=b1["h"])
+                # Bearish OB: b0 bullish, b1 bearish engulfing, b2 confirms
+                is_bear_ob = (
+                    b0["o"] < b0["c"]
+                    and b1["c"] < b1["o"]
+                    and b2["c"] < b2["o"]
+                    and b1["h"] > b0["h"]
+                    and b2["c"] < b1["l"]
+                )
 
-        if is_bear_ob:
-            self._add_ob(inst, is_bull=False, bottom=b1["l"], top=b1["h"])
+                if is_bull_ob:
+                    self._add_ob(inst, is_bull=True, bottom=b1["l"], top=b1["h"])
+                if is_bear_ob:
+                    self._add_ob(inst, is_bull=False, bottom=b1["l"], top=b1["h"])
 
     def _add_ob(self, inst: str, is_bull: bool, bottom: float, top: float) -> None:
         """Add an OB zone with FIFO eviction (max 2 per direction)."""
