@@ -413,6 +413,8 @@ class DbLogger:
                 "vwap_close": vwap_close,
                 "opening_range_high": or_high,
                 "opening_range_low": or_low,
+                "weekly_vpoc": getattr(safety, '_weekly_vpoc', {}).get(inst),
+                "weekly_val": getattr(safety, '_weekly_val', {}).get(inst),
             }
             # Strip None values
             row = {k: v for k, v in row.items() if v is not None}

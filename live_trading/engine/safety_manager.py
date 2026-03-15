@@ -791,18 +791,21 @@ class SafetyManager:
         })
 
     def get_ict_proximity(self, inst: str, price: float) -> list[str]:
-        """Return list of ICT level tags near the given price. Observation only.
+        """Return list of ICT level tags with distance near the given price.
 
-        Called at trade entry time to tag trades with nearby ICT levels.
+        Format: "wPOC +2.3" or "BEAR_OB" (OBs show no distance — entry is inside zone).
+        Called at trade entry time to tag trades. Observation only.
         Threshold: 10 pts for weekly levels, inside zone for OBs.
         """
         tags = []
         vpoc = self._weekly_vpoc.get(inst)
         if vpoc is not None and abs(price - vpoc) <= 10:
-            tags.append("wPOC")
+            dist = round(price - vpoc, 1)
+            tags.append(f"wPOC {dist:+.1f}")
         val = self._weekly_val.get(inst)
         if val is not None and abs(price - val) <= 10:
-            tags.append("wVAL")
+            dist = round(price - val, 1)
+            tags.append(f"wVAL {dist:+.1f}")
         for ob in self._active_obs.get(inst, []):
             if ob["bottom"] <= price <= ob["top"]:
                 tags.append("BULL_OB" if ob["is_bull"] else "BEAR_OB")

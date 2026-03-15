@@ -290,9 +290,9 @@ export function TradeLog({ trades }: TradeLogProps) {
                         padding: '1px 4px',
                         borderRadius: 3,
                         fontWeight: 600,
-                        backgroundColor: tag === 'wPOC' || tag === 'BULL_OB'
+                        backgroundColor: tag.startsWith('wPOC') || tag === 'BULL_OB'
                           ? 'rgba(0,204,102,0.15)' : 'rgba(204,51,51,0.15)',
-                        color: tag === 'wPOC' || tag === 'BULL_OB'
+                        color: tag.startsWith('wPOC') || tag === 'BULL_OB'
                           ? '#00cc66' : '#cc3333',
                       }}>{tag}</span>
                     ))}
