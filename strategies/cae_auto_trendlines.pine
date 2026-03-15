@@ -18,12 +18,13 @@ grp_piv = "PIVOT DETECTION"
 lb_left     = input.int(10, "Pivot Left Bars", minval=3, maxval=50, group=grp_piv)
 lb_right    = input.int(3, "Pivot Right Bars", minval=1, maxval=10, group=grp_piv)
 min_spacing = input.int(10, "Min Bars Between Pivots", minval=1, maxval=50, group=grp_piv)
+piv_lookback = input.int(5, "Connect to Last N Pivots", minval=1, maxval=10, group=grp_piv,
+     tooltip="Each new pivot draws trendlines to the last N qualifying pivots, not just the previous one.")
 
 grp_tl = "TRENDLINES"
-max_tl       = input.int(15, "Max Trendlines per Side", minval=1, maxval=40, group=grp_tl)
-max_age      = input.int(500, "Max Trendline Age (bars)", minval=50, maxval=2000, group=grp_tl)
+max_age      = input.int(2000, "Max Trendline Age (bars)", minval=50, maxval=5000, group=grp_tl)
 show_broken  = input.bool(true, "Show Broken Trendlines", group=grp_tl)
-broken_max   = input.int(300, "Remove Broken After N Bars", minval=10, maxval=1000, group=grp_tl)
+broken_max   = input.int(1000, "Remove Broken After N Bars", minval=10, maxval=5000, group=grp_tl)
 long_color   = input.color(#2196F3, "Long Setup Color (desc peaks)", group=grp_tl)
 short_color  = input.color(#FF9800, "Short Setup Color (asc troughs)", group=grp_tl)
 active_style = input.string("Solid", "Active Line Style", options=["Solid", "Dashed", "Dotted"], group=grp_tl)
@@ -112,7 +113,7 @@ int grace = min_spacing + 2 * lb_right
 // TRENDLINE CONSTRUCTION -- inline, no helper function
 // ============================================================================
 
-// --- Peaks: detect and build descending peak trendlines (long setup, blue) ---
+// --- Peaks: detect and build descending peak trendlines (long setup) ---
 if not na(ph)
     int pbar = bar_index - lb_right
     float pval = ph
@@ -126,25 +127,25 @@ if not na(ph)
         if array.size(peak_bars) > 20
             array.shift(peak_bars)
             array.shift(peak_vals)
-        if array.size(peak_bars) >= 2
-            int pb = array.get(peak_bars, array.size(peak_bars) - 2)
-            float pv = array.get(peak_vals, array.size(peak_vals) - 2)
-            if pval < pv
-                float sl = (pval - pv) / math.max(pbar - pb, 1)
-                line ln = line.new(pb, pv, pbar, pval, xloc=xloc.bar_index, color=long_color, style=act_style, width=active_width)
-                array.push(long_lines, ln)
-                array.push(long_x1, pb)
-                array.push(long_y1, pv)
-                array.push(long_slope, sl)
-                array.push(long_broken, 0)
-                if array.size(long_lines) > max_tl
-                    line.delete(array.shift(long_lines))
-                    array.shift(long_x1)
-                    array.shift(long_y1)
-                    array.shift(long_slope)
-                    array.shift(long_broken)
+        // Connect to last N qualifying pivots (not just the previous one)
+        int psz = array.size(peak_bars)
+        if psz >= 2
+            int pstart = math.max(0, psz - 1 - piv_lookback)
+            int pk = psz - 2
+            while pk >= pstart
+                int pb = array.get(peak_bars, pk)
+                float pv = array.get(peak_vals, pk)
+                if pval < pv
+                    float sl = (pval - pv) / math.max(pbar - pb, 1)
+                    line ln = line.new(pb, pv, pbar, pval, xloc=xloc.bar_index, color=long_color, style=act_style, width=active_width)
+                    array.push(long_lines, ln)
+                    array.push(long_x1, pb)
+                    array.push(long_y1, pv)
+                    array.push(long_slope, sl)
+                    array.push(long_broken, 0)
+                pk -= 1
 
-// --- Troughs: detect and build ascending trough trendlines (short setup, orange) ---
+// --- Troughs: detect and build ascending trough trendlines (short setup) ---
 if not na(pl)
     int tbar = bar_index - lb_right
     float tval = pl
@@ -158,23 +159,23 @@ if not na(pl)
         if array.size(trough_bars) > 20
             array.shift(trough_bars)
             array.shift(trough_vals)
-        if array.size(trough_bars) >= 2
-            int tb = array.get(trough_bars, array.size(trough_bars) - 2)
-            float tv = array.get(trough_vals, array.size(trough_vals) - 2)
-            if tval > tv
-                float sl2 = (tval - tv) / math.max(tbar - tb, 1)
-                line ln2 = line.new(tb, tv, tbar, tval, xloc=xloc.bar_index, color=short_color, style=act_style, width=active_width)
-                array.push(short_lines, ln2)
-                array.push(short_x1, tb)
-                array.push(short_y1, tv)
-                array.push(short_slope, sl2)
-                array.push(short_broken, 0)
-                if array.size(short_lines) > max_tl
-                    line.delete(array.shift(short_lines))
-                    array.shift(short_x1)
-                    array.shift(short_y1)
-                    array.shift(short_slope)
-                    array.shift(short_broken)
+        // Connect to last N qualifying pivots (not just the previous one)
+        int tsz = array.size(trough_bars)
+        if tsz >= 2
+            int tstart = math.max(0, tsz - 1 - piv_lookback)
+            int tk = tsz - 2
+            while tk >= tstart
+                int tb = array.get(trough_bars, tk)
+                float tv = array.get(trough_vals, tk)
+                if tval > tv
+                    float sl2 = (tval - tv) / math.max(tbar - tb, 1)
+                    line ln2 = line.new(tb, tv, tbar, tval, xloc=xloc.bar_index, color=short_color, style=act_style, width=active_width)
+                    array.push(short_lines, ln2)
+                    array.push(short_x1, tb)
+                    array.push(short_y1, tv)
+                    array.push(short_slope, sl2)
+                    array.push(short_broken, 0)
+                tk -= 1
 
 // ============================================================================
 // TRENDLINE EXTENSION + BREAKOUT + PRUNING -- long setup lines

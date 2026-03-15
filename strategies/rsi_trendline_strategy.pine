@@ -1,0 +1,301 @@
+//@version=6
+// RSI Trendline Breakout Strategy -- Visual backtesting for TradingView
+// Long on bullish break (RSI breaks above descending peak trendline)
+// Short on bearish break (RSI breaks below ascending trough trendline)
+// Uses same trendline logic as CAE-ATL indicator
+// Run CAE-ATL indicator alongside this strategy to see trendlines on RSI pane
+strategy("RSI Trendline Breakout", overlay=true,
+     initial_capital=1000,
+     default_qty_type=strategy.fixed,
+     default_qty_value=1,
+     commission_type=strategy.commission.cash_per_contract,
+     commission_value=0.52,
+     slippage=0,
+     margin_long=0,
+     margin_short=0,
+     process_orders_on_close=false,
+     calc_on_every_tick=false,
+     fill_orders_on_standard_ohlc=true,
+     max_bars_back=5000)
+
+// ============================================================================
+// INPUTS
+// ============================================================================
+grp_rsi = "RSI SETTINGS"
+rsi_len = input.int(8, "RSI Length (1-min)", minval=2, maxval=50, group=grp_rsi)
+
+grp_piv = "PIVOT DETECTION"
+lb_left      = input.int(10, "Pivot Left Bars", minval=3, maxval=50, group=grp_piv)
+lb_right     = input.int(3, "Pivot Right Bars", minval=1, maxval=10, group=grp_piv)
+min_spacing  = input.int(10, "Min Bars Between Pivots", minval=1, maxval=50, group=grp_piv)
+piv_lookback = input.int(5, "Connect to Last N Pivots", minval=1, maxval=10, group=grp_piv,
+     tooltip="Each new pivot draws trendlines to the last N qualifying pivots.")
+
+grp_tl = "TRENDLINES"
+max_age    = input.int(2000, "Max Trendline Age (bars)", minval=50, maxval=5000, group=grp_tl)
+broken_max = input.int(1000, "Remove Broken After N Bars", minval=10, maxval=5000, group=grp_tl)
+break_thresh = input.float(0.0, "Break Threshold (RSI pts)", minval=0, maxval=10, step=0.5, group=grp_tl)
+
+grp_exit = "EXIT SETTINGS"
+tp_pts   = input.int(7, "Take Profit (pts)", minval=1, maxval=100, step=1, group=grp_exit)
+sl_pts   = input.int(30, "Stop Loss (pts)", minval=1, maxval=100, step=1, group=grp_exit)
+cooldown = input.int(30, "Cooldown Bars", minval=0, maxval=300, group=grp_exit)
+
+grp_sess = "SESSION FILTER"
+use_session    = input.bool(true, "Use Entry Window", group=grp_sess)
+sess_entry     = input.session("0930-1300", "Entry Window (ET)", group=grp_sess)
+sess_eod_close = input.session("0930-1600", "EOD Close Window (ET)", group=grp_sess)
+
+grp_disp = "DISPLAY"
+show_signals = input.bool(true, "Show Entry Signals", group=grp_disp)
+
+// ============================================================================
+// RSI COMPUTATION (1-min close)
+// ============================================================================
+rsi_val = ta.rsi(close, rsi_len)
+
+// ============================================================================
+// PIVOT DETECTION (on RSI, same as CAE-ATL)
+// ============================================================================
+ph = ta.pivothigh(rsi_val, lb_left, lb_right)
+pl = ta.pivotlow(rsi_val, lb_left, lb_right)
+
+var array<int>   peak_bars   = array.new<int>(0)
+var array<float> peak_vals   = array.new<float>(0)
+var array<int>   trough_bars = array.new<int>(0)
+var array<float> trough_vals = array.new<float>(0)
+
+// ============================================================================
+// TRENDLINE STATE -- 4 parallel arrays per side (no line objects needed)
+// ============================================================================
+var array<int>   long_x1     = array.new<int>(0)
+var array<float> long_y1     = array.new<float>(0)
+var array<float> long_slope  = array.new<float>(0)
+var array<int>   long_broken = array.new<int>(0)
+
+var array<int>   short_x1     = array.new<int>(0)
+var array<float> short_y1     = array.new<float>(0)
+var array<float> short_slope  = array.new<float>(0)
+var array<int>   short_broken = array.new<int>(0)
+
+// Break signal flags
+var bool bull_break = false
+var bool bear_break = false
+bull_break := false
+bear_break := false
+
+// Grace period before checking breaks
+int grace = min_spacing + 2 * lb_right
+
+// ============================================================================
+// TRENDLINE CONSTRUCTION -- Peaks (descending = long setup)
+// ============================================================================
+if not na(ph)
+    int pbar = bar_index - lb_right
+    float pval = ph
+    bool spacing_ok = true
+    if array.size(peak_bars) > 0
+        if pbar - array.get(peak_bars, array.size(peak_bars) - 1) < min_spacing
+            spacing_ok := false
+    if spacing_ok
+        array.push(peak_bars, pbar)
+        array.push(peak_vals, pval)
+        if array.size(peak_bars) > 20
+            array.shift(peak_bars)
+            array.shift(peak_vals)
+        int psz = array.size(peak_bars)
+        if psz >= 2
+            int pstart = math.max(0, psz - 1 - piv_lookback)
+            int pk = psz - 2
+            while pk >= pstart
+                int pb = array.get(peak_bars, pk)
+                float pv = array.get(peak_vals, pk)
+                if pval < pv
+                    float sl = (pval - pv) / math.max(pbar - pb, 1)
+                    array.push(long_x1, pb)
+                    array.push(long_y1, pv)
+                    array.push(long_slope, sl)
+                    array.push(long_broken, 0)
+                pk -= 1
+
+// ============================================================================
+// TRENDLINE CONSTRUCTION -- Troughs (ascending = short setup)
+// ============================================================================
+if not na(pl)
+    int tbar = bar_index - lb_right
+    float tval = pl
+    bool spacing_ok2 = true
+    if array.size(trough_bars) > 0
+        if tbar - array.get(trough_bars, array.size(trough_bars) - 1) < min_spacing
+            spacing_ok2 := false
+    if spacing_ok2
+        array.push(trough_bars, tbar)
+        array.push(trough_vals, tval)
+        if array.size(trough_bars) > 20
+            array.shift(trough_bars)
+            array.shift(trough_vals)
+        int tsz = array.size(trough_bars)
+        if tsz >= 2
+            int tstart = math.max(0, tsz - 1 - piv_lookback)
+            int tk = tsz - 2
+            while tk >= tstart
+                int tb = array.get(trough_bars, tk)
+                float tv = array.get(trough_vals, tk)
+                if tval > tv
+                    float sl2 = (tval - tv) / math.max(tbar - tb, 1)
+                    array.push(short_x1, tb)
+                    array.push(short_y1, tv)
+                    array.push(short_slope, sl2)
+                    array.push(short_broken, 0)
+                tk -= 1
+
+// ============================================================================
+// TRENDLINE EXTENSION + BREAKOUT + PRUNING -- Long setup (descending peaks)
+// ============================================================================
+if array.size(long_x1) > 0
+    int i = array.size(long_x1) - 1
+    while i >= 0
+        int brk = array.get(long_broken, i)
+        int x1v = array.get(long_x1, i)
+        float y1v = array.get(long_y1, i)
+        float slp = array.get(long_slope, i)
+        float proj = y1v + slp * (bar_index - x1v)
+        bool do_remove = false
+        if brk == 0 and (bar_index - x1v) > max_age
+            do_remove := true
+        if brk > 0 and (bar_index - brk) > broken_max
+            do_remove := true
+        if brk == 0 and (proj > 105 or proj < -5)
+            do_remove := true
+        if do_remove
+            array.remove(long_x1, i)
+            array.remove(long_y1, i)
+            array.remove(long_slope, i)
+            array.remove(long_broken, i)
+        else
+            if brk == 0
+                if (bar_index - x1v) > grace and not na(rsi_val) and rsi_val > proj + break_thresh
+                    array.set(long_broken, i, bar_index)
+                    bull_break := true
+        i -= 1
+
+// ============================================================================
+// TRENDLINE EXTENSION + BREAKOUT + PRUNING -- Short setup (ascending troughs)
+// ============================================================================
+if array.size(short_x1) > 0
+    int j = array.size(short_x1) - 1
+    while j >= 0
+        int brk2 = array.get(short_broken, j)
+        int x1v2 = array.get(short_x1, j)
+        float y1v2 = array.get(short_y1, j)
+        float slp2 = array.get(short_slope, j)
+        float proj2 = y1v2 + slp2 * (bar_index - x1v2)
+        bool do_remove2 = false
+        if brk2 == 0 and (bar_index - x1v2) > max_age
+            do_remove2 := true
+        if brk2 > 0 and (bar_index - brk2) > broken_max
+            do_remove2 := true
+        if brk2 == 0 and (proj2 > 105 or proj2 < -5)
+            do_remove2 := true
+        if do_remove2
+            array.remove(short_x1, j)
+            array.remove(short_y1, j)
+            array.remove(short_slope, j)
+            array.remove(short_broken, j)
+        else
+            if brk2 == 0
+                if (bar_index - x1v2) > grace and not na(rsi_val) and rsi_val < proj2 - break_thresh
+                    array.set(short_broken, j, bar_index)
+                    bear_break := true
+        j -= 1
+
+// ============================================================================
+// SESSION FILTER
+// ============================================================================
+in_entry_window = not use_session or not na(time(timeframe.period, sess_entry, "America/New_York"))
+in_session      = not use_session or not na(time(timeframe.period, sess_eod_close, "America/New_York"))
+
+// ============================================================================
+// COOLDOWN
+// ============================================================================
+var int bars_since_exit = 9999
+bars_since_exit += 1
+cooldown_ok = bars_since_exit >= cooldown
+
+// ============================================================================
+// EXIT LOGIC (processed before entries -- priority: EOD > SL > TP)
+// ============================================================================
+
+// ---- 1. EOD CLOSE ----
+if strategy.position_size != 0 and not in_session
+    strategy.close_all(comment="EOD")
+    bars_since_exit := 0
+
+// ---- 2. STOP LOSS (prev bar close) ----
+if strategy.position_size > 0 and close[1] <= strategy.position_avg_price - sl_pts
+    strategy.close("Long", comment="SL")
+    bars_since_exit := 0
+if strategy.position_size < 0 and close[1] >= strategy.position_avg_price + sl_pts
+    strategy.close("Short", comment="SL")
+    bars_since_exit := 0
+
+// ---- 3. TAKE PROFIT (prev bar close) ----
+if strategy.position_size > 0 and close[1] >= strategy.position_avg_price + tp_pts
+    strategy.close("Long", comment="TP")
+    bars_since_exit := 0
+if strategy.position_size < 0 and close[1] <= strategy.position_avg_price - tp_pts
+    strategy.close("Short", comment="TP")
+    bars_since_exit := 0
+
+// ============================================================================
+// ENTRY LOGIC
+// ============================================================================
+long_entry  = bull_break and in_entry_window and cooldown_ok
+short_entry = bear_break and in_entry_window and cooldown_ok
+
+if long_entry and strategy.position_size == 0
+    strategy.entry("Long", strategy.long)
+    bars_since_exit := 9999
+
+if short_entry and strategy.position_size == 0
+    strategy.entry("Short", strategy.short)
+    bars_since_exit := 9999
+
+// ============================================================================
+// PLOTS -- entry/exit markers on price chart
+// ============================================================================
+plotshape(show_signals and long_entry and strategy.position_size == 0,
+     title="Long Entry", style=shape.triangleup, location=location.belowbar,
+     color=color.green, size=size.small, text="L")
+plotshape(show_signals and short_entry and strategy.position_size == 0,
+     title="Short Entry", style=shape.triangledown, location=location.abovebar,
+     color=color.red, size=size.small, text="S")
+
+// ============================================================================
+// INFO TABLE
+// ============================================================================
+var table info = table.new(position.top_right, 2, 8, bgcolor=color.new(color.black, 80))
+if barstate.islastconfirmedhistory
+    table.cell(info, 0, 0, "RSI TL Break", text_color=color.white, text_size=size.small)
+    table.cell(info, 1, 0, "v1", text_color=color.aqua, text_size=size.small)
+
+    table.cell(info, 0, 1, "RSI Len", text_color=color.gray, text_size=size.small)
+    table.cell(info, 1, 1, str.tostring(rsi_len), text_color=color.white, text_size=size.small)
+
+    table.cell(info, 0, 2, "Pivots", text_color=color.gray, text_size=size.small)
+    table.cell(info, 1, 2, str.tostring(lb_left) + "/" + str.tostring(lb_right), text_color=color.white, text_size=size.small)
+
+    table.cell(info, 0, 3, "TP", text_color=color.gray, text_size=size.small)
+    table.cell(info, 1, 3, str.tostring(tp_pts) + " pts", text_color=color.lime, text_size=size.small)
+
+    table.cell(info, 0, 4, "SL", text_color=color.gray, text_size=size.small)
+    table.cell(info, 1, 4, str.tostring(sl_pts) + " pts", text_color=color.yellow, text_size=size.small)
+
+    table.cell(info, 0, 5, "Cooldown", text_color=color.gray, text_size=size.small)
+    table.cell(info, 1, 5, str.tostring(cooldown) + " bars", text_color=color.white, text_size=size.small)
+
+    table.cell(info, 0, 6, "Grace", text_color=color.gray, text_size=size.small)
+    table.cell(info, 1, 6, str.tostring(grace) + " bars", text_color=color.white, text_size=size.small)
+
+    table.cell(info, 0, 7, "Long/Short TLs", text_color=color.gray, text_size=size.small)
+    table.cell(info, 1, 7, str.tostring(array.size(long_x1)) + "/" + str.tostring(array.size(short_x1)), text_color=color.aqua, text_size=size.small)
