@@ -35,7 +35,17 @@ Each agent reads the modified files + their dependencies and reports bugs.
 - Does force_resume accidentally re-enable something that should stay disabled?
 - Path traversal / injection on any user-supplied strings?
 
-### 5. Edge Cases & Timing
+### 5. Research-to-Implementation Parity
+- If the feature is based on forensic/backtest findings, does the implementation match the EXACT methodology?
+- **Timeframe**: Research used 5-min bars? Implementation must resample to 5-min. NOT run on 1-min.
+- **Lookback**: Research used lookback=50? Implementation must use 50.
+- **Thresholds**: Research used 5pts proximity? Implementation must use 5pts.
+- **Data source**: Research used RTH-only bars? Implementation must filter to RTH.
+- **Convention**: Research used bar[i-1] for signals? Implementation must match.
+- Cross-reference the research document/script, not just the implementation plan.
+- (Added Mar 14 2026: OB detection was implemented on 1-min but forensics validated on 5-min. Jason caught it, not the review agents.)
+
+### 6. Edge Cases & Timing
 - What happens if on_trade_closed fires for an unknown strategy_id?
 - What if two strategies on the same instrument both have open positions during a pause?
 - Commission lookup: per-strategy or per-instrument? Does last-writer-wins cause errors?
