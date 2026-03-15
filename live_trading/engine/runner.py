@@ -1246,8 +1246,8 @@ def _build_engine_handle(state: EngineState) -> EngineHandle:
                 "instrument": inst,
                 "strategy_id": sid,
                 "last_price": last_price,
-                "sm_value": round(strat.sm.value, 4),
-                "rsi_value": round(strat.rsi.curr, 1),
+                "sm_value": round(getattr(getattr(strat, 'sm', None), 'value', 0.0), 4),
+                "rsi_value": round(getattr(getattr(strat, 'rsi', None), 'curr', 0.0), 1),
                 "cooldown_remaining": cooldown_remaining,
                 "cooldown_total": strat.config.cooldown,
                 "max_loss_pts": strat.config.max_loss_pts,
@@ -1693,7 +1693,11 @@ async def run(config: EngineConfig) -> None:
 
     # --- 6. Create strategies + structure monitors (keyed by strategy_id) ---
     for strat_config in config.strategies:
-        strategy = IncrementalStrategy(strat_config, event_bus)
+        if strat_config.entry_signal == "rsi_trendline":
+            from engine.rsi_trendline_strategy import RsiTrendlineStrategy
+            strategy = RsiTrendlineStrategy(strat_config, event_bus)
+        else:
+            strategy = IncrementalStrategy(strat_config, event_bus)
         sid = strategy.strategy_id
         state.strategies[sid] = strategy
 

@@ -7,6 +7,7 @@ import type {
   SeriesMarker,
   Time,
   LineData,
+  LogicalRange,
 } from 'lightweight-charts';
 import type { BarData, BlockedSignal, InstrumentData, Trade, SafetyStatusData, SessionInfo, SessionData } from '../types';
 import { SessionTradeList } from './SessionTradeList';
@@ -163,6 +164,37 @@ function computePivotPointSupertrend(
   return result;
 }
 
+const RSI_PERIOD = 8;
+
+function computeWilderRSI(closes: number[], period: number): number[] {
+  const n = closes.length;
+  const rsi = new Array(n).fill(50);
+  if (n < period + 1) return rsi;
+
+  const deltas = closes.map((c, i) => i === 0 ? 0 : c - closes[i - 1]);
+  let avgGain = 0, avgLoss = 0;
+
+  // SMA seed
+  for (let i = 1; i <= period; i++) {
+    if (deltas[i] > 0) avgGain += deltas[i];
+    else avgLoss += Math.abs(deltas[i]);
+  }
+  avgGain /= period;
+  avgLoss /= period;
+
+  rsi[period] = avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss);
+
+  // Wilder smoothing
+  for (let i = period + 1; i < n; i++) {
+    const gain = deltas[i] > 0 ? deltas[i] : 0;
+    const loss = deltas[i] < 0 ? Math.abs(deltas[i]) : 0;
+    avgGain = (avgGain * (period - 1) + gain) / period;
+    avgLoss = (avgLoss * (period - 1) + loss) / period;
+    rsi[i] = avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss);
+  }
+  return rsi;
+}
+
 const btnStyle = (active?: boolean): React.CSSProperties => ({
   padding: '4px 10px',
   fontSize: 10,
@@ -183,6 +215,13 @@ export function PriceChart({ bars, trades, instrument, safetyStatus, blockedSign
   const ppstSeriesRef = useRef<ISeriesApi<'Line'> | null>(null);
   const prevBarsLenRef = useRef(0);
   const priceLineRefs = useRef<IPriceLine[]>([]);
+
+  // RSI sub-chart state
+  const [rsiEnabled, setRsiEnabled] = useState(false);
+  const rsiContainerRef = useRef<HTMLDivElement>(null);
+  const rsiChartRef = useRef<IChartApi | null>(null);
+  const rsiSeriesRef = useRef<ISeriesApi<'Line'> | null>(null);
+  const rsiSyncingRef = useRef(false);
 
   // Pivot Point Supertrend state
   const [ppstEnabled, setPpstEnabled] = useState(false);
@@ -738,6 +777,168 @@ export function PriceChart({ bars, trades, instrument, safetyStatus, blockedSign
     }
   }, [ictEnabled, safetyStatus?.ob_zones, instrument, replayMode, replayIctLevels]);
 
+  // RSI sub-chart: create/destroy based on rsiEnabled
+  useEffect(() => {
+    if (!rsiEnabled) {
+      // Destroy RSI chart when disabled
+      if (rsiChartRef.current) {
+        rsiChartRef.current.remove();
+        rsiChartRef.current = null;
+        rsiSeriesRef.current = null;
+      }
+      return;
+    }
+
+    if (!rsiContainerRef.current || rsiChartRef.current) return;
+
+    const rsiChart = createChart(rsiContainerRef.current, {
+      width: rsiContainerRef.current.clientWidth,
+      height: 100,
+      layout: {
+        background: { type: ColorType.Solid, color: '#16213e' },
+        textColor: '#888',
+        fontFamily: FONT,
+        fontSize: 11,
+      },
+      grid: {
+        vertLines: { color: '#1e2a45' },
+        horzLines: { color: '#1e2a45' },
+      },
+      timeScale: {
+        borderColor: '#2a2a4a',
+        visible: false, // main chart shows time axis
+      },
+      rightPriceScale: {
+        borderColor: '#2a2a4a',
+        scaleMargins: { top: 0.05, bottom: 0.05 },
+      },
+      crosshair: {
+        horzLine: { color: '#8888cc44' },
+        vertLine: { color: '#8888cc44' },
+      },
+    });
+
+    const rsiSeries = rsiChart.addLineSeries({
+      lineWidth: 1,
+      color: '#8888cc',
+      priceLineVisible: false,
+      lastValueVisible: true,
+    });
+
+    // Overbought line at 70
+    rsiSeries.createPriceLine({
+      price: 70,
+      color: '#ff444488',
+      lineWidth: 1,
+      lineStyle: 2, // Dashed
+      title: '',
+      axisLabelVisible: false,
+    });
+
+    // Oversold line at 30
+    rsiSeries.createPriceLine({
+      price: 30,
+      color: '#00ff8888',
+      lineWidth: 1,
+      lineStyle: 2, // Dashed
+      title: '',
+      axisLabelVisible: false,
+    });
+
+    // Chop zone lines at 60 and 40
+    rsiSeries.createPriceLine({
+      price: 60,
+      color: '#55555544',
+      lineWidth: 1,
+      lineStyle: 3, // Dotted
+      title: '',
+      axisLabelVisible: false,
+    });
+    rsiSeries.createPriceLine({
+      price: 40,
+      color: '#55555544',
+      lineWidth: 1,
+      lineStyle: 3, // Dotted
+      title: '',
+      axisLabelVisible: false,
+    });
+
+    rsiChartRef.current = rsiChart;
+    rsiSeriesRef.current = rsiSeries;
+
+    // Sync time scales: main -> RSI
+    const mainChart = chartRef.current;
+    if (mainChart) {
+      const onMainRangeChange = (range: LogicalRange | null) => {
+        if (rsiSyncingRef.current || !range) return;
+        rsiSyncingRef.current = true;
+        rsiChart.timeScale().setVisibleLogicalRange(range);
+        rsiSyncingRef.current = false;
+      };
+      mainChart.timeScale().subscribeVisibleLogicalRangeChange(onMainRangeChange);
+
+      // Sync time scales: RSI -> main
+      const onRsiRangeChange = (range: LogicalRange | null) => {
+        if (rsiSyncingRef.current || !range) return;
+        rsiSyncingRef.current = true;
+        mainChart.timeScale().setVisibleLogicalRange(range);
+        rsiSyncingRef.current = false;
+      };
+      rsiChart.timeScale().subscribeVisibleLogicalRangeChange(onRsiRangeChange);
+
+      // Resize observer for RSI chart
+      const rsiContainer = rsiContainerRef.current;
+      const resizeObserver = new ResizeObserver((entries) => {
+        for (const entry of entries) {
+          rsiChart.applyOptions({ width: entry.contentRect.width });
+        }
+      });
+      resizeObserver.observe(rsiContainer);
+
+      return () => {
+        mainChart.timeScale().unsubscribeVisibleLogicalRangeChange(onMainRangeChange);
+        rsiChart.timeScale().unsubscribeVisibleLogicalRangeChange(onRsiRangeChange);
+        resizeObserver.disconnect();
+      };
+    }
+  }, [rsiEnabled]);
+
+  // RSI data: update when bars change or RSI is toggled on
+  useEffect(() => {
+    if (!rsiEnabled || !rsiSeriesRef.current || activeBars.length === 0) return;
+
+    const closes = activeBars.map((b) => b.close);
+    const rsiValues = computeWilderRSI(closes, RSI_PERIOD);
+
+    const rsiData: LineData[] = activeBars.map((b, i) => ({
+      time: b.time as unknown as Time,
+      value: rsiValues[i],
+    }));
+
+    rsiSeriesRef.current.setData(rsiData);
+
+    // Sync visible range from main chart after data load
+    const mainChart = chartRef.current;
+    const rsiChart = rsiChartRef.current;
+    if (mainChart && rsiChart) {
+      const range = mainChart.timeScale().getVisibleLogicalRange();
+      if (range) {
+        rsiChart.timeScale().setVisibleLogicalRange(range);
+      }
+    }
+  }, [rsiEnabled, activeBars]);
+
+  // Cleanup RSI chart on unmount
+  useEffect(() => {
+    return () => {
+      if (rsiChartRef.current) {
+        rsiChartRef.current.remove();
+        rsiChartRef.current = null;
+        rsiSeriesRef.current = null;
+      }
+    };
+  }, []);
+
   return (
     <div
       style={{
@@ -847,6 +1048,14 @@ export function PriceChart({ bars, trades, instrument, safetyStatus, blockedSign
               &#9881;
             </button>
           )}
+
+          {/* RSI sub-chart toggle */}
+          <button
+            style={btnStyle(rsiEnabled)}
+            onClick={() => setRsiEnabled((v) => !v)}
+          >
+            RSI
+          </button>
 
           {replayMode && (
             <button style={btnStyle(true)} onClick={handleLive}>
@@ -970,6 +1179,14 @@ export function PriceChart({ bars, trades, instrument, safetyStatus, blockedSign
       )}
 
       <div ref={containerRef} />
+
+      {/* RSI sub-chart */}
+      {rsiEnabled && (
+        <div
+          ref={rsiContainerRef}
+          style={{ marginTop: 4 }}
+        />
+      )}
 
       {/* Trade readout (replay or live trades) */}
       {activeTrades.length > 0 && (

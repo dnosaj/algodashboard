@@ -19,6 +19,7 @@ class StrategyConfig:
     sm_norm: int = 200        # SM peak normalization lookback
     sm_ema: int = 100         # SM EMA smoothing on PVI/NVI
     sm_threshold: float = 0.0 # Min |SM| for direction confirmation
+    entry_signal: str = "sm_rsi"  # "sm_rsi" (default) or "rsi_trendline"
     exit_mode: str = "sm_flip"  # "sm_flip" (default) or "tp_scalp"
     tp_pts: int = 0           # Take profit in points (tp_scalp mode)
     trail_activate_pts: int = 5   # Activate trailing stop after this MFE
@@ -56,8 +57,8 @@ class StrategyConfig:
 @dataclass
 class SafetyConfig:
     """Safety limits and circuit breakers."""
-    max_daily_loss: float = 650.0     # Max daily loss in dollars before halt (raised from 600: A1+B1+C2+MES2 worst-case=$619)
-    max_position_size: int = 5        # Max contracts per instrument
+    max_daily_loss: float = 800.0     # Max daily loss in dollars before halt (5 strategies worst-case=$777)
+    max_position_size: int = 10       # Max contracts per instrument (6 MNQ possible simultaneously)
     max_consecutive_losses: int = 5   # Consecutive losses before pause
     heartbeat_timeout_sec: int = 90   # Alert if no data for this long (polls every 60s)
     flatten_timeout_sec: int = 300   # Flatten all if no data for this long
@@ -236,7 +237,34 @@ MES_V2 = StrategyConfig(
     session_close_et="16:00",  # No forced close — TP/SL/BE_TIME resolve all trades. 15:30 was v9.4 legacy, never triggered in v2 backtest, killed a live winner Mar 13.
 )
 
+MNQ_RSI_TL = StrategyConfig(
+    instrument="MNQ",
+    strategy_id="MNQ_RSI_TL",
+    entry_signal="rsi_trendline",
+    sm_index=10, sm_flow=12, sm_norm=200, sm_ema=100,  # unused but required defaults
+    sm_threshold=0.0,
+    exit_mode="tp_scalp",
+    tp_pts=20,                      # TP2 runner target
+    trail_activate_pts=20,
+    trail_distance_pts=8,
+    rsi_len=8,                      # RSI(8) on 1-min closes
+    rsi_buy=60, rsi_sell=40,        # unused for trendline entry but present
+    cooldown=30,
+    max_loss_pts=40,
+    dollar_per_pt=2.0,
+    entry_qty=2,
+    partial_tp_pts=7,               # TP1 scalp
+    partial_qty=1,
+    move_sl_to_be_after_tp1=True,
+    max_strategy_daily_loss=200.0,
+    session_end_et="13:00",
+    session_close_et="16:00",
+)
+
 DEFAULT_CONFIG = EngineConfig(
-    strategies=[MNQ_V15, MNQ_VSCALPB, MNQ_VSCALPC, MES_V2],
+    strategies=[
+        MNQ_V15, MNQ_VSCALPB, MNQ_VSCALPC, MES_V2,
+        # MNQ_RSI_TL,  # RSI trendline breakout — paper trade, uncomment to enable
+    ],
     safety=SafetyConfig(paper_mode=True),
 )
