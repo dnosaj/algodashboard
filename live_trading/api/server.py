@@ -735,12 +735,27 @@ def create_app(handle: EngineHandle) -> FastAPI:
             except Exception:
                 pass  # If we can't read the file, overwrite is fine
 
+        # Capture ICT levels snapshot for session replay
+        ict_snapshot = {}
+        safety = getattr(handle, 'safety', None)
+        if safety:
+            for sc in handle.config.strategies:
+                inst = sc.instrument
+                if inst not in ict_snapshot:
+                    ict_snapshot[inst] = {
+                        "weekly_vpoc": getattr(safety, '_weekly_vpoc', {}).get(inst),
+                        "weekly_val": getattr(safety, '_weekly_val', {}).get(inst),
+                        "vpoc_strength": getattr(safety, '_weekly_vpoc_strength', {}).get(inst, 0),
+                        "ob_zones": getattr(safety, '_active_obs', {}).get(inst, []),
+                    }
+
         session = {
             "date": save_date,
             "saved_at": datetime.utcnow().isoformat() + "Z",
             "timezone": "ET",  # Bar times are ET-shifted epochs
             "bars": bars_data,
             "trades": trades_data,
+            "ict_levels": ict_snapshot,
         }
 
         filepath.write_text(json.dumps(session, indent=2))

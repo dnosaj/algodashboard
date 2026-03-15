@@ -204,6 +204,7 @@ export function PriceChart({ bars, trades, instrument, safetyStatus, blockedSign
   const [replayBars, setReplayBars] = useState<BarData[]>([]);
   const [replayTrades, setReplayTrades] = useState<Trade[]>([]);
   const [replayLabel, setReplayLabel] = useState('');
+  const [replayIctLevels, setReplayIctLevels] = useState<Record<string, any> | null>(null);
   const [saving, setSaving] = useState(false);
 
   // Deduplicate bars by time (keep last occurrence) — lightweight-charts
@@ -273,6 +274,7 @@ export function PriceChart({ bars, trades, instrument, safetyStatus, blockedSign
         setReplayBars(instBars);
         setReplayTrades(instTrades);
         setReplayLabel(data.date || filename);
+        setReplayIctLevels((data as any).ict_levels || null);
         setReplayMode(true);
         prevBarsLenRef.current = 0; // force full setData
       }
@@ -287,6 +289,7 @@ export function PriceChart({ bars, trades, instrument, safetyStatus, blockedSign
     setReplayBars([]);
     setReplayTrades([]);
     setReplayLabel('');
+    setReplayIctLevels(null);
     prevBarsLenRef.current = 0; // force full setData
   }, []);
 
@@ -629,7 +632,9 @@ export function PriceChart({ bars, trades, instrument, safetyStatus, blockedSign
 
     if (!ictEnabled) return;
 
-    const levels = safetyStatus?.ict_levels?.[instrument];
+    const levels = replayMode && replayIctLevels
+      ? replayIctLevels[instrument]
+      : safetyStatus?.ict_levels?.[instrument];
     if (!levels) return;
 
     // Determine last price for proximity-based line style
@@ -662,7 +667,7 @@ export function PriceChart({ bars, trades, instrument, safetyStatus, blockedSign
       });
       ictLineRefs.current.push(line);
     }
-  }, [ictEnabled, safetyStatus?.ict_levels, instrument, activeBars]);
+  }, [ictEnabled, safetyStatus?.ict_levels, instrument, activeBars, replayMode, replayIctLevels]);
 
   // ICT Order Block zone price lines
   useEffect(() => {
@@ -676,7 +681,9 @@ export function PriceChart({ bars, trades, instrument, safetyStatus, blockedSign
 
     if (!ictEnabled) return;
 
-    const zones = safetyStatus?.ob_zones?.[instrument];
+    const zones = replayMode && replayIctLevels
+      ? replayIctLevels[instrument]?.ob_zones
+      : safetyStatus?.ob_zones?.[instrument];
     if (!zones || zones.length === 0) return;
 
     for (const ob of zones) {
@@ -716,7 +723,7 @@ export function PriceChart({ bars, trades, instrument, safetyStatus, blockedSign
       });
       obLineRefs.current.push(midLine);
     }
-  }, [ictEnabled, safetyStatus?.ob_zones, instrument]);
+  }, [ictEnabled, safetyStatus?.ob_zones, instrument, replayMode, replayIctLevels]);
 
   return (
     <div
