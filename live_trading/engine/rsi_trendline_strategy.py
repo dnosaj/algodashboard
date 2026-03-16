@@ -357,6 +357,7 @@ class TradeState:
     # MAE tracking
     min_adverse: float = 0.0
     # Entry context
+    entry_sm_value: float = 0.0
     entry_rsi_value: float = 0.0
     entry_bar_volume: float = 0.0
     entry_minutes_from_open: int = 0
@@ -409,8 +410,11 @@ class RsiTrendlineStrategy:
         self.rsi_indicator = IncrementalRSI1m(period=config.rsi_len)
         self.tracker = TrendlineTracker()
 
-        # Stub SM attribute so runner.py status dict doesn't crash on strat.sm.value
-        self.sm = type('obj', (object,), {'value': 0.0})()
+        # SM indicator — passive observer (not used for entries, logged for analysis)
+        from engine.strategy import IncrementalSM
+        self.sm = IncrementalSM(
+            config.sm_index, config.sm_flow, config.sm_norm, config.sm_ema
+        )
 
         # Stub RSI attribute matching IncrementalStrategy's rsi.curr for exit context
         self.rsi = type('obj', (object,), {'curr': 50.0})()
@@ -472,6 +476,7 @@ class RsiTrendlineStrategy:
         rsi_val = self.rsi_indicator.update(bar.close)
         self.tracker.update(self.bar_idx, rsi_val)
         self.rsi.curr = rsi_val
+        self.sm.update(bar.close, bar.volume)
         self._prev_bar = bar
         self.bar_idx += 1
 
@@ -515,6 +520,7 @@ class RsiTrendlineStrategy:
         rsi_val = self.rsi_indicator.update(bar.close)
         long_break, short_break = self.tracker.update(self.bar_idx, rsi_val)
         self.rsi.curr = rsi_val
+        self.sm.update(bar.close, bar.volume)
 
         # Emit bar event
         if self.event_bus:
@@ -665,6 +671,7 @@ class RsiTrendlineStrategy:
         self.state.trade_group_id = f"{self.strategy_id}_{bar.timestamp.isoformat()}"
 
         # Capture entry context
+        self.state.entry_sm_value = round(self.sm.value, 4)
         self.state.entry_rsi_value = rsi_val
         self.state.entry_bar_volume = bar.volume
         self.state.entry_minutes_from_open = _et_minutes_from_datetime(bar.timestamp) - _MARKET_OPEN_ET
@@ -713,7 +720,7 @@ class RsiTrendlineStrategy:
             strategy_id=self.strategy_id,
             qty=qty,
             is_partial=True,
-            entry_sm_value=0.0,
+            entry_sm_value=self.state.entry_sm_value,
             entry_sm_velocity=0.0,
             entry_rsi_value=self.state.entry_rsi_value,
             entry_bar_volume=self.state.entry_bar_volume,
@@ -721,7 +728,7 @@ class RsiTrendlineStrategy:
             entry_bar_range=self.state.entry_bar_range,
             concurrent_positions=self.state.concurrent_positions,
             streak_at_entry=self.state.streak_at_entry,
-            exit_sm_value=0.0,
+            exit_sm_value=round(self.sm.value, 4),
             exit_rsi_value=self.rsi_indicator.value,
             is_runner=False,
             gate_vix_close=self.state.gate_vix_close,
@@ -785,7 +792,7 @@ class RsiTrendlineStrategy:
             bars_held=self.bar_idx - self.state.entry_bar_idx,
             strategy_id=self.strategy_id,
             qty=qty,
-            entry_sm_value=0.0,
+            entry_sm_value=self.state.entry_sm_value,
             entry_sm_velocity=0.0,
             entry_rsi_value=self.state.entry_rsi_value,
             entry_bar_volume=self.state.entry_bar_volume,
@@ -793,7 +800,7 @@ class RsiTrendlineStrategy:
             entry_bar_range=self.state.entry_bar_range,
             concurrent_positions=self.state.concurrent_positions,
             streak_at_entry=self.state.streak_at_entry,
-            exit_sm_value=0.0,
+            exit_sm_value=round(self.sm.value, 4),
             exit_rsi_value=self.rsi_indicator.value,
             is_runner=self.state.partial_filled,
             gate_vix_close=self.state.gate_vix_close,
