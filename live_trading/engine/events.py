@@ -31,6 +31,7 @@ class ExitReason(Enum):
     TAKE_PROFIT = "TP"
     TAKE_PROFIT_PARTIAL = "TP1"
     TRAIL_STOP = "TRAIL"
+    BREAKEVEN = "BE"
     BE_TIME = "BE_TIME"
     STRUCTURE = "STRUCTURE"
     EOD = "EOD"

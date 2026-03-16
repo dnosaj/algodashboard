@@ -601,14 +601,17 @@ class IncrementalStrategy:
             # After TP1 with move_sl_to_be_after_tp1, SL moves to breakeven
             if self.config.max_loss_pts > 0 and prev_bar is not None:
                 sl_pts = self.config.max_loss_pts
+                is_be = False
                 if self.config.move_sl_to_be_after_tp1 and self.state.partial_filled:
                     sl_pts = 0  # Breakeven: close if price returns to entry
+                    is_be = True
+                reason = ExitReason.BREAKEVEN if is_be else ExitReason.STOP_LOSS
                 if self.state.position == 1 and prev_bar.close <= self.state.entry_price - sl_pts:
-                    signal = self._close_position(bar, ExitReason.STOP_LOSS)
+                    signal = self._close_position(bar, reason)
                     self._update_prev(sm_now, bar)
                     return signal
                 elif self.state.position == -1 and prev_bar.close >= self.state.entry_price + sl_pts:
-                    signal = self._close_position(bar, ExitReason.STOP_LOSS)
+                    signal = self._close_position(bar, reason)
                     self._update_prev(sm_now, bar)
                     return signal
 
