@@ -14,7 +14,12 @@ type: project
 
 ### Build Next
 1. **Frontier Agent** — Automates what we do manually in sessions (hypothesis → backtest → IS/OOS → report). Aligns with learning goals: Ollama, LMStudio, local models, agentic architecture, model routing. Highest value + highest learning.
-2. **Fix Digest Agent** — Focus on multi-week pattern detection (not daily summaries). Fix accuracy issues. Consider weekly cadence instead of daily when <5 trades/day. If it can't deliver actionable insights, pause it.
+2. **Redesign Digest as Daily Log + Weekly Insight Scan** (decided Mar 16):
+   - **Daily log** (~$0.10 or free, Ollama/pure code): Postmortem table — every trade with entry context (RSI, SM, side, P&L, exit reason, gate state). No analysis. Saved to Supabase. Data collection layer.
+   - **Weekly insight scan** (~$0.50-1.00, Claude): Scans full week's trades + gate states + VCR + dPOC data. Pattern detection across 20-40 trades. Produces `flags_for_frontier`. This is where actionable intelligence comes from — enough data for real patterns, not noise.
+   - **Cost**: ~$1.50/week vs current ~$10.50/week. 85% cost reduction.
+   - **First Ollama project**: Daily log is the learning vehicle for local model deployment.
+   - Current 22-tool Digest Agent paused until redesign is complete.
 3. **Dashboard improvements (Pillars 1+2)** — Loss day messaging, rolling 30-day context. No AI, pure UI, immediate value.
 
 ### Defer
