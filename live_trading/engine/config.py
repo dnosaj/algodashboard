@@ -188,7 +188,7 @@ MNQ_VSCALPC = StrategyConfig(
     sm_index=12, sm_flow=12, sm_norm=200, sm_ema=80,  # Robust: index 10→12, EMA 100→80
     sm_threshold=0.0,  # Same entries as V15 — runner captures larger moves
     exit_mode="tp_scalp",
-    tp_pts=30,  # Robust: TP2=30 (was 60 crash-safety cap). Structure monitor may exit before this.
+    tp_pts=30,  # Robust: fixed TP2=30 (validated 3-year, +$9,754, better P&L than structure exit)
     trail_activate_pts=30,
     trail_distance_pts=8,
     rsi_len=8, rsi_buy=60, rsi_sell=40,
@@ -207,11 +207,10 @@ MNQ_VSCALPC = StrategyConfig(
     adr_lookback_days=14,             # ADR directional gate: 14-day lookback (STRONG PASS)
     adr_directional_threshold=0.3,    # Block when move_from_open/ADR >= 0.3 in entry direction
     session_end_et="13:00",  # Same late-day cutoff as V15
-    # Structure-based exit: adaptive pivot swing exits on runner (replaces fixed TP2=25)
-    structure_exit_type="pivot",       # Pivot N-bar fractal detection
-    structure_exit_lookback=50,        # Left bars for pivot confirmation
-    structure_exit_pivot_right=2,      # Right confirmation bars
-    structure_exit_buffer_pts=2.0,     # Exit 2pts before swing level (sweet spot from sweep)
+    # Structure exit REMOVED for robust config — fixed TP2=30 produces +$2,091 more P&L over 3 years
+    # with comparable risk-adjusted returns. Structure exit (LB=50/PR=2/Buf=2) was only validated on
+    # old SM(10/12/200/100). Best structure params for robust SM would be LB=30/PR=3/Buf=1 but still
+    # underperform fixed TP2. Satellite (VSCALPC_SAT) keeps structure exit with original SM.
 )
 
 # vScalpC Satellite — exact copy of pre-robust vScalpC config (0 losing years across 3 years)
