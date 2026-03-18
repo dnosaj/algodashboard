@@ -158,8 +158,8 @@ class TrendlineTracker:
     the projection beyond break_thresh and past the grace period, mark broken.
     """
 
-    def __init__(self, lb_left: int = 10, lb_right: int = 3,
-                 min_spacing: int = 10, piv_lookback: int = 5,
+    def __init__(self, lb_left: int = 10, lb_right: int = 4,
+                 min_spacing: int = 15, piv_lookback: int = 5,
                  max_age: int = 2000, broken_max: int = 1000,
                  break_thresh: float = 0.0):
         self.lb_left = lb_left
@@ -557,7 +557,7 @@ class RsiTrendlineStrategy:
             # Stop loss: check bar[i-1] close, fill at bar[i] open
             # After TP1 with move_sl_to_be_after_tp1, SL moves to breakeven
             if self.config.max_loss_pts > 0 and prev_bar is not None:
-                sl_pts = self.state.active_sl_pts  # Set at entry time based on SM alignment
+                sl_pts = self.config.max_loss_pts  # Fixed SL from config
                 is_be = False
                 if self.config.move_sl_to_be_after_tp1 and self.state.partial_filled:
                     sl_pts = 0  # Breakeven
@@ -674,11 +674,7 @@ class RsiTrendlineStrategy:
 
         # Capture entry context
         self.state.entry_sm_value = round(self.sm.value, 4)
-        # SM-aware SL: tighter SL=25 when SM opposes entry (validated OOS PF +4.2%)
-        sm_val = self.sm.value
-        sm_opposes = ((side == "long" and sm_val < -0.25) or
-                      (side == "short" and sm_val > 0.25))
-        self.state.active_sl_pts = 25.0 if sm_opposes else self.config.max_loss_pts
+        self.state.active_sl_pts = self.config.max_loss_pts  # Fixed SL from config (SM filter removed)
         self.state.entry_rsi_value = rsi_val
         self.state.entry_bar_volume = bar.volume
         self.state.entry_minutes_from_open = _et_minutes_from_datetime(bar.timestamp) - _MARKET_OPEN_ET

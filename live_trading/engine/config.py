@@ -57,8 +57,8 @@ class StrategyConfig:
 @dataclass
 class SafetyConfig:
     """Safety limits and circuit breakers."""
-    max_daily_loss: float = 800.0     # Max daily loss in dollars before halt (5 strategies worst-case=$777)
-    max_position_size: int = 10       # Max contracts per instrument (6 MNQ possible simultaneously)
+    max_daily_loss: float = 1200.0    # Max daily loss in dollars before halt (worst-case=$1,070 across 6 strategies)
+    max_position_size: int = 12       # Max contracts per instrument (9 MNQ possible simultaneously)
     max_consecutive_losses: int = 5   # Consecutive losses before pause
     heartbeat_timeout_sec: int = 90   # Alert if no data for this long (polls every 60s)
     flatten_timeout_sec: int = 300   # Flatten all if no data for this long
@@ -134,7 +134,7 @@ MNQ_V11 = StrategyConfig(
 MNQ_V15 = StrategyConfig(
     instrument="MNQ",
     strategy_id="MNQ_V15",
-    sm_index=10, sm_flow=12, sm_norm=200, sm_ema=100,
+    sm_index=12, sm_flow=12, sm_norm=200, sm_ema=80,  # Robust: index 10→12, EMA 100→80
     sm_threshold=0.0,  # v15 validated with threshold=0 on TV
     exit_mode="tp_scalp",
     tp_pts=7,             # Upgraded from 5: Sharpe 2.73 vs 2.08, PF 1.36 vs 1.29, IS/OOS STRONG
@@ -143,7 +143,8 @@ MNQ_V15 = StrategyConfig(
     rsi_len=8, rsi_buy=60, rsi_sell=40,
     cooldown=20, max_loss_pts=40,
     dollar_per_pt=2.0,
-    max_strategy_daily_loss=100.0,
+    entry_qty=2,          # Robust: 2 contracts
+    max_strategy_daily_loss=200.0,  # Robust: scaled for 2 contracts (was 100)
     vix_death_zone_min=19.0,
     vix_death_zone_max=22.0,
     leledc_maj_qual=9,  # Block entry on Leledc exhaustion (9+ consecutive directional closes)
@@ -184,21 +185,21 @@ MNQ_VSCALPB = StrategyConfig(
 MNQ_VSCALPC = StrategyConfig(
     instrument="MNQ",
     strategy_id="MNQ_VSCALPC",
-    sm_index=10, sm_flow=12, sm_norm=200, sm_ema=100,
+    sm_index=12, sm_flow=12, sm_norm=200, sm_ema=80,  # Robust: index 10→12, EMA 100→80
     sm_threshold=0.0,  # Same entries as V15 — runner captures larger moves
     exit_mode="tp_scalp",
-    tp_pts=60,  # Crash-safety cap: resting OCO at 60pts. Structure monitor exits before this.
-    trail_activate_pts=60,
+    tp_pts=30,  # Robust: TP2=30 (was 60 crash-safety cap). Structure monitor may exit before this.
+    trail_activate_pts=30,
     trail_distance_pts=8,
     rsi_len=8, rsi_buy=60, rsi_sell=40,
-    cooldown=20, max_loss_pts=40,
+    cooldown=20, max_loss_pts=30,  # Robust: SL=30 (was 40)
     dollar_per_pt=2.0,
-    entry_qty=2,           # 2 contracts: partial at TP1, runner to TP2
-    partial_tp_pts=7,      # TP1: close 1 contract at +7 pts ($14)
-    partial_qty=1,         # Close 1 of 2 at TP1
+    entry_qty=3,           # Robust: 3 contracts (was 2): scalp 2 at TP1, 1 runner to TP2
+    partial_tp_pts=10,     # Robust: TP1=10 (was 7): close 2 contracts at +10 pts ($40)
+    partial_qty=2,         # Robust: close 2 of 3 at TP1 (was 1)
     breakeven_after_bars=45,   # Close stale runners after 45 bars (~45 min)
     move_sl_to_be_after_tp1=True,  # After TP1, move runner SL to entry (risk-free runner)
-    max_strategy_daily_loss=200.0,  # One 2-contract SL is $160; $200 allows recovery
+    max_strategy_daily_loss=400.0,  # Robust: 3 contracts × SL=30 × $2 = $180 worst case (was 200)
     vix_death_zone_min=19.0,   # Same VIX gate as V15 (same entries)
     vix_death_zone_max=22.0,
     leledc_maj_qual=9,  # Block entry on Leledc exhaustion (9+ consecutive directional closes)
@@ -213,11 +214,43 @@ MNQ_VSCALPC = StrategyConfig(
     structure_exit_buffer_pts=2.0,     # Exit 2pts before swing level (sweet spot from sweep)
 )
 
+# vScalpC Satellite — exact copy of pre-robust vScalpC config (0 losing years across 3 years)
+MNQ_VSCALPC_SAT = StrategyConfig(
+    instrument="MNQ",
+    strategy_id="MNQ_VSCALPC_SAT",
+    sm_index=10, sm_flow=12, sm_norm=200, sm_ema=100,
+    sm_threshold=0.0,
+    exit_mode="tp_scalp",
+    tp_pts=60,  # Crash-safety cap: resting OCO at 60pts. Structure monitor exits before this.
+    trail_activate_pts=60,
+    trail_distance_pts=8,
+    rsi_len=8, rsi_buy=60, rsi_sell=40,
+    cooldown=20, max_loss_pts=40,
+    dollar_per_pt=2.0,
+    entry_qty=2,           # 2 contracts: partial at TP1, runner to TP2
+    partial_tp_pts=7,      # TP1: close 1 contract at +7 pts ($14)
+    partial_qty=1,         # Close 1 of 2 at TP1
+    breakeven_after_bars=45,   # Close stale runners after 45 bars (~45 min)
+    move_sl_to_be_after_tp1=True,  # After TP1, move runner SL to entry (risk-free runner)
+    max_strategy_daily_loss=200.0,  # One 2-contract SL is $160; $200 allows recovery
+    vix_death_zone_min=19.0,
+    vix_death_zone_max=22.0,
+    leledc_maj_qual=9,
+    prior_day_atr_min=263.8,
+    adr_lookback_days=14,
+    adr_directional_threshold=0.3,
+    session_end_et="13:00",
+    structure_exit_type="pivot",
+    structure_exit_lookback=50,
+    structure_exit_pivot_right=2,
+    structure_exit_buffer_pts=2.0,
+)
+
 MES_V2 = StrategyConfig(
     instrument="MES",
     strategy_id="MES_V2",
-    sm_index=20, sm_flow=12, sm_norm=400, sm_ema=255,
-    sm_threshold=0.0,  # MES weak entries are profitable
+    sm_index=20, sm_flow=14, sm_norm=400, sm_ema=300,  # Robust: flow 12→14, EMA 255→300
+    sm_threshold=0.25,  # Robust: 0.0→0.25 (high-conviction entries)
     exit_mode="tp_scalp",
     tp_pts=20,  # $100/contract — replaces SM flip exit
     trail_activate_pts=20,
@@ -227,7 +260,7 @@ MES_V2 = StrategyConfig(
     dollar_per_pt=5.0,
     commission_per_side=1.25,
     entry_qty=2,           # 2 contracts: partial at TP1, runner to TP2
-    partial_tp_pts=6,      # TP1: close 1 contract at +6 pts ($30) — swept Mar 11: PF +8.2%, Sharpe +28%, TP1 fill 39%→60%
+    partial_tp_pts=8,      # Robust: TP1=8 (was 6): close 1 contract at +8 pts ($40)
     partial_qty=1,         # Close 1 of 2 at TP1
     breakeven_after_bars=75,   # Close stale trades after 75 bars (~1h15m)
     max_strategy_daily_loss=400.0,    # One 2-contract SL is ~$355; $400 allows recovery
@@ -244,13 +277,13 @@ MNQ_RSI_TL = StrategyConfig(
     sm_index=10, sm_flow=12, sm_norm=200, sm_ema=100,  # unused but required defaults
     sm_threshold=0.0,
     exit_mode="tp_scalp",
-    tp_pts=20,                      # TP2 runner target
-    trail_activate_pts=20,
+    tp_pts=25,                      # Robust: TP2=25 (was 20)
+    trail_activate_pts=25,
     trail_distance_pts=8,
-    rsi_len=8,                      # RSI(8) on 1-min closes
+    rsi_len=10,                     # Robust: RSI(10) (was 8) on 1-min closes
     rsi_buy=60, rsi_sell=40,        # unused for trendline entry but present
     cooldown=30,
-    max_loss_pts=40,
+    max_loss_pts=35,                # Robust: SL=35 (was 40)
     dollar_per_pt=2.0,
     entry_qty=2,
     partial_tp_pts=7,               # TP1 scalp
@@ -264,7 +297,7 @@ MNQ_RSI_TL = StrategyConfig(
 
 DEFAULT_CONFIG = EngineConfig(
     strategies=[
-        MNQ_V15, MNQ_VSCALPB, MNQ_VSCALPC, MES_V2,
+        MNQ_V15, MNQ_VSCALPB, MNQ_VSCALPC, MNQ_VSCALPC_SAT, MES_V2,
         MNQ_RSI_TL,  # RSI trendline breakout — paper trading
     ],
     safety=SafetyConfig(paper_mode=True),
