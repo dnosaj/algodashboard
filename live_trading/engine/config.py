@@ -57,8 +57,8 @@ class StrategyConfig:
 @dataclass
 class SafetyConfig:
     """Safety limits and circuit breakers."""
-    max_daily_loss: float = 1200.0    # Max daily loss in dollars before halt (worst-case=$1,070 across 6 strategies)
-    max_position_size: int = 12       # Max contracts per instrument (9 MNQ possible simultaneously)
+    max_daily_loss: float = 1200.0    # Max daily loss in dollars before halt (worst-case=$1,027 across 6 strategies + commissions)
+    max_position_size: int = 12       # Max contracts per instrument (10 MNQ possible: A(2)+B(1)+C(3)+C-SAT(2)+RSI_TL(2))
     max_consecutive_losses: int = 5   # Consecutive losses before pause
     heartbeat_timeout_sec: int = 90   # Alert if no data for this long (polls every 60s)
     flatten_timeout_sec: int = 300   # Flatten all if no data for this long
