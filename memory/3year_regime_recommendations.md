@@ -31,27 +31,31 @@ Current portfolio total: +$15,672 over 3 years. Two strategies fail at least one
 
 ### Change 1: MES v2 — SM_T 0.0 → 0.25, SM flow 12→14, SM EMA 255→300, TP1 6→8
 
-**Why:** This is the highest-impact change. Current MES v2 loses $1,706 in Year 1 (low vol) because SM_T=0.0 takes every signal including weak ones that fail in low-vol conditions. 43% of 326 passing MES configs use SM_T=0.25 vs only 23% for SM_T=0.0.
+**Why:** Current MES v2 loses $1,652 in Year 1 (low vol) with -$2,952 drawdown because SM_T=0.0 takes every signal including weak ones. 43% of 326 passing MES configs use SM_T=0.25 vs only 23% for SM_T=0.0.
 
 **What changes:**
 - SM(20/12/400/255) → SM(20/14/400/300)
 - SM_T=0.0 → SM_T=0.25
 - TP1=6 → TP1=8
 
-**Expected impact:**
-- Year 1: -$1,706 → +$1,309 (fixes the losing year)
-- Year 2: +$1,235 → +$1,545 (improves)
-- Year 3: +$4,602 → +$1,598 (reduces — fewer trades at higher threshold)
-- 3Y Total: +$4,131 → +$4,451
+**Validated comparison (runner backtest, 3 years):**
 
-**The trade-off:** Year 3 (current high-vol period) drops from +$4,602 to +$1,598. You make $3,000 less in the best year but gain $3,000 in the worst year. Total is slightly higher (+$320) but the profile changes from boom-bust to consistent.
+| | Current | Robust |
+|---|---|---|
+| Y1 (low vol) | -$1,652, PF 0.901, DD -$2,952 | **+$1,476**, PF 1.193, DD **-$1,450** |
+| Y2 (med vol) | +$3,189, PF 1.199 | +$2,015, PF 1.233 |
+| Y3 (high vol) | +$8,701, PF 1.473 | +$2,375, PF 1.248 |
+| 3Y Total | **+$10,238** | +$5,866 |
+| Losing years | 1 | **0** |
+| Worst DD | -$2,952 | **-$1,450** |
+| Trades/year | ~350 | ~163 |
 
-**Trade count:** ~340 trades/year current → ~160 trades/year robust. Half the trades, better quality.
+**The trade-off is stark:** Current makes $4,371 more over 3 years but has a losing year and 2x the drawdown. Robust is steady but leaves ~$1,457/year on the table.
 
 **Decision factors:**
 - If you believe high vol continues: keep current (more profit now)
 - If you want insurance: change to robust (consistent but lower ceiling)
-- Middle ground: run both configs as separate strategies (current + robust) at 1 contract each, let the data decide
+- Middle ground: run both configs as separate strategies at 1 contract each
 
 ### Change 2: vScalpC — SM Index 10→12, EMA 100→80, TP1 7→10, TP2 25→30, SL 40→30
 
