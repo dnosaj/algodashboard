@@ -106,6 +106,24 @@ Current portfolio total: +$15,672 over 3 years. Two strategies fail at least one
 3. **vScalpA** — moderate improvement, small trade-off. Consider.
 4. **vScalpB** — marginal, low confidence. Skip unless other changes prove out.
 
+### Change 5: RSI TL — RSI 8→10, lb_right 3→4, min_spacing 10→15, SL 40→35, TP2 20→25, REMOVE SM filter
+
+**Why:** Current RSI TL config fails Years 1+2. The overnight 3-year sweep (320 signal × 144 exit configs) found the robust config. 3.1% of signal configs pass all 3 years. The key shifts are more confirmation bars (lb_right 4 vs 3) and wider pivot spacing (15 vs 10) — the signal needs to be more selective to work across regimes.
+
+**What changes:**
+- RSI period: 8 → 10
+- lb_right: 3 → 4 (more confirmation, less repainting risk)
+- min_spacing: 10 → 15 (wider pivot spacing, fewer but better trendlines)
+- SL: 40 → 35
+- TP2: 20 → 25
+- REMOVE the SM-aware tighter SL (implemented Mar 16 — does NOT hold on 3-year data, Year 3 goes negative)
+
+**Expected impact:**
+- Current 3Y: +$4,385 (fails Y1 -$2,441, Y2 -$860)
+- Robust 3Y: +$8,973 (passes all 3 years, worst PF 1.059)
+
+**The trade-off:** Year 3 drops from +$7,686 to +$3,717. You lose $3,969 in the best year but gain $5,742 in the two losing years. Net improvement +$4,588 over 3 years.
+
 ## What a veteran algo trader would consider
 
 - These backtests have no slippage, no partial fills, no market impact. Real performance will be worse than backtest by some amount. The thin edges (PF 1.02-1.09 in bad years) may not survive execution costs.

@@ -116,16 +116,54 @@ OOS STRONGER than IS — no overfitting. Runner captures real momentum continuat
 6. **Standalone edge exists** — no SM requirement. Pure RSI trendline breakout.
 7. **Wide SL with small TP** — counterintuitive but data confirms. SL=30-40 with TP=5-7.
 
+## 3-Year Validation (Mar 17-18, 2026)
+
+### Current params fail on prior years
+| Period | Trades | WR% | PF | Net$ |
+|--------|--------|------|------|------|
+| Year 1 (Feb23-24) | 1,897 | 68.1% | 0.941 | -$2,441 |
+| Year 2 (Feb24-25) | 2,020 | 69.3% | 0.982 | -$860 |
+| Year 3 (Feb25-26) | 2,314 | 71.8% | 1.140 | +$7,686 |
+
+### 3-Year signal sweep: 10 of 320 pass (3.1%)
+Best signal config: **RSI(10), lb_left=10, lb_right=4, min_spacing=15**
+- vs current: RSI(8), lb_left=10, lb_right=3, min_spacing=10
+- Key shifts: RSI 8→10, lb_right 3→4, min_spacing 10→15
+- Cluster: RSI 10 (40%), lb_right=4 (50%), min_spacing=15 (60%)
+
+### 3-Year exit sweep: 26 of 144 pass (18.1%)
+Best exit: **TP1=7, TP2=25, SL=35, CD=30** (worst-year PF 1.059, +$8,973 total)
+- CD=30 mandatory (100%)
+- SL=35 preferred (38%)
+- Current exits (TP1=7/TP2=20/SL=40) rank #2
+
+### SM filter: does NOT help on 3-year data
+- No filter: +$8,973 (best)
+- Block SM-opposed: +$3,038 (kills Year 1)
+- Tighter SL on opposed: +$2,952 (Year 3 goes negative)
+- The SM-aware tighter SL implemented on Mar 16 should be REMOVED
+
+### Robust RSI TL Config
+RSI(10), lb_left=10, lb_right=4, min_spacing=15, TP1=7, TP2=25, SL=35, CD=30, entry 9:30-13:00, SL→BE after TP1, NO SM filter.
+
 ## Next Steps
 
-- [ ] IS/OOS on scalp configs (TP=5/SL=40/CD=30, TP=7/SL=30/CD=30)
-- [ ] Pine Script strategy for visual validation on TradingView
-- [ ] Correlation with existing portfolio strategies (vScalpA, vScalpB, vScalpC, MES v2)
-- [ ] Test as standalone vs SM-confirmed entry
-- [ ] Test overnight trendlines breaking during NY session (Jason's best setup)
+- [x] IS/OOS on scalp configs — done Mar 16
+- [x] Pine Script strategy — done Mar 15
+- [x] Correlation with portfolio — done Mar 16 (near-zero, 0.024 avg)
+- [x] SM alignment analysis — done Mar 16 (helps on dev-only, hurts on 3-year)
+- [x] 3-year signal+exit sweep — done Mar 17-18
+- [ ] Implement robust config in live engine
+- [ ] Remove SM-aware tighter SL (doesn't hold on 3-year data)
+- [ ] Test overnight trendlines breaking during NY session
 
 ## Files
 
 - Backtest script: `backtesting_engine/strategies/rsi_trendline_backtest.py`
+- 3-year sweep: `backtesting_engine/strategies/rsi_tl_3year_sweep.py`
+- Correlation analysis: `backtesting_engine/strategies/rsi_tl_correlation_analysis.py`
+- SM conviction sweep: `backtesting_engine/strategies/rsi_tl_sm_conviction_sweep.py`
 - Pine indicator: `strategies/cae_auto_trendlines.pine`
+- Pine strategy: `strategies/rsi_trendline_strategy.pine`
+- Live engine: `live_trading/engine/rsi_trendline_strategy.py`
 - Plan: `plans/cae-atl-indicator.md`
