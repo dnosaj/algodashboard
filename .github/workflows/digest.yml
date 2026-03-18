@@ -1,11 +1,12 @@
 name: Trading Digest Agent
 
 on:
-  schedule:
-    # EOD digest — 17:00 ET (21:00 UTC during EDT, 16:00 ET during EST — both after 15:30 EOD exit)
-    - cron: '0 21 * * 1-5'
-    # Morning briefing — 07:00 ET (11:00 UTC during EDT, 06:00 ET during EST)
-    - cron: '0 11 * * 1-5'
+  # SHELVED Mar 18 — Digest producing bad numbers, redesigning as Daily Log + Weekly Insight Scan
+  # schedule:
+  #   # EOD digest — 17:00 ET (21:00 UTC during EDT, 16:00 ET during EST — both after 15:30 EOD exit)
+  #   - cron: '0 21 * * 1-5'
+  #   # Morning briefing — 07:00 ET (11:00 UTC during EDT, 06:00 ET during EST)
+  #   - cron: '0 11 * * 1-5'
   workflow_dispatch:
     inputs:
       mode:
