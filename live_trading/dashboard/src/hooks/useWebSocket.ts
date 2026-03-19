@@ -10,6 +10,7 @@ import type {
   SignalEvent,
   WSMessage,
 } from '../types';
+import { supabase } from '../lib/supabase';
 
 interface UseWebSocketReturn {
   status: StatusData | null;
@@ -56,8 +57,60 @@ export function useWebSocket(url: string): UseWebSocketReturn {
       }
 
       if (tradesRes.ok) {
-        const tradesData = await tradesRes.json();
-        if (mountedRef.current) setTrades(tradesData || []);
+        let tradesData: Trade[] = (await tradesRes.json()) || [];
+
+        // Also load today's trades from Supabase (survives engine restarts)
+        if (supabase) {
+          try {
+            const today = new Date();
+            const etOffset = -5; // ET offset (approximate, DST-aware would need more logic)
+            const etDate = new Date(today.getTime() + etOffset * 3600000);
+            const dateStr = etDate.toISOString().slice(0, 10);
+
+            const { data: sbTrades } = await supabase
+              .from('trades')
+              .select('strategy_id,instrument,side,entry_price,exit_price,entry_time,exit_time,pts,pnl_net,exit_reason,bars_held,qty,is_partial')
+              .in('source', ['paper', 'live'])
+              .gte('trade_date', dateStr)
+              .order('exit_time', { ascending: false });
+
+            if (sbTrades && sbTrades.length > 0) {
+              // Convert Supabase rows to Trade format
+              const supabaseTrades: Trade[] = sbTrades.map((t: Record<string, unknown>) => ({
+                instrument: t.instrument as string,
+                strategy_id: t.strategy_id as string,
+                side: ((t.side as string) || '').toUpperCase() as 'LONG' | 'SHORT',
+                entry_price: t.entry_price as number,
+                exit_price: t.exit_price as number | null,
+                entry_time: t.entry_time as string,
+                exit_time: t.exit_time as string | null,
+                pts: t.pts as number,
+                pnl: t.pnl_net as number,
+                exit_reason: t.exit_reason as string,
+                bars_held: t.bars_held as number,
+                qty: t.qty as number,
+                is_partial: t.is_partial as boolean,
+              }));
+
+              // Merge: use engine trades as primary, fill in any Supabase trades
+              // that aren't already in the engine's list (from before restart)
+              const engineKeys = new Set(
+                tradesData.map((t: Trade) => `${t.strategy_id}_${t.entry_time}_${t.is_partial}`)
+              );
+              const missingTrades = supabaseTrades.filter(
+                (t) => !engineKeys.has(`${t.strategy_id}_${t.entry_time}_${t.is_partial}`)
+              );
+              if (missingTrades.length > 0) {
+                tradesData = [...tradesData, ...missingTrades];
+                console.log(`[Supabase] Loaded ${missingTrades.length} trades from before engine restart`);
+              }
+            }
+          } catch (err) {
+            console.warn('[Supabase] Failed to load today trades:', err);
+          }
+        }
+
+        if (mountedRef.current) setTrades(tradesData);
       }
 
       if (mountedRef.current) {
