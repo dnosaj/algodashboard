@@ -57,9 +57,9 @@ class StrategyConfig:
 @dataclass
 class SafetyConfig:
     """Safety limits and circuit breakers."""
-    max_daily_loss: float = 1200.0    # Max daily loss in dollars before halt (worst-case=$1,027 across 6 strategies + commissions)
+    max_daily_loss: float = 2000.0    # Max daily loss before halt. 4 correlated SM strategies can lose $471 in one bar.
     max_position_size: int = 12       # Max contracts per instrument (10 MNQ possible: A(2)+B(1)+C(3)+C-SAT(2)+RSI_TL(2))
-    max_consecutive_losses: int = 5   # Consecutive losses before pause
+    max_consecutive_losses: int = 15  # 4 SM strategies fire together = 4 losses per bad bar. 15 allows 3 bad bars + individual losses.
     heartbeat_timeout_sec: int = 90   # Alert if no data for this long (polls every 60s)
     flatten_timeout_sec: int = 300   # Flatten all if no data for this long
     order_fill_timeout_sec: int = 5   # Alert if no fill within this time
@@ -144,7 +144,7 @@ MNQ_V15 = StrategyConfig(
     cooldown=20, max_loss_pts=40,
     dollar_per_pt=2.0,
     entry_qty=2,          # Robust: 2 contracts
-    max_strategy_daily_loss=200.0,  # Robust: scaled for 2 contracts (was 100)
+    max_strategy_daily_loss=400.0,  # 2ct × SL=40 = $164. Allows 2 full SLs + recovery.
     vix_death_zone_min=19.0,
     vix_death_zone_max=22.0,
     leledc_maj_qual=9,  # Block entry on Leledc exhaustion (9+ consecutive directional closes)
@@ -231,7 +231,7 @@ MNQ_VSCALPC_SAT = StrategyConfig(
     partial_qty=1,         # Close 1 of 2 at TP1
     breakeven_after_bars=45,   # Close stale runners after 45 bars (~45 min)
     move_sl_to_be_after_tp1=True,  # After TP1, move runner SL to entry (risk-free runner)
-    max_strategy_daily_loss=200.0,  # One 2-contract SL is $160; $200 allows recovery
+    max_strategy_daily_loss=400.0,  # 2ct × SL=40 = $164. Allows 2 full SLs + recovery.
     vix_death_zone_min=19.0,
     vix_death_zone_max=22.0,
     leledc_maj_qual=9,
@@ -262,7 +262,7 @@ MES_V2 = StrategyConfig(
     partial_tp_pts=8,      # Robust: TP1=8 (was 6): close 1 contract at +8 pts ($40)
     partial_qty=1,         # Close 1 of 2 at TP1
     breakeven_after_bars=75,   # Close stale trades after 75 bars (~1h15m)
-    max_strategy_daily_loss=400.0,    # One 2-contract SL is ~$355; $400 allows recovery
+    max_strategy_daily_loss=800.0,    # 2ct × SL=35 × $5 = $355. Allows 2 full SLs + recovery.
     prior_day_level_buffer=5.0,  # Block within 5 pts of prior-day levels
     prior_day_level_keys=("vpoc", "val"),  # VPOC+VAL only — H/L and VAH remove profitable breakouts (Mar 13 breakdown)
     session_end_et="14:15",    # Last entry 14:15 ET — entries after 14:00 are net negative (PF 0.78-0.87). Mar 13 sweep.
@@ -288,7 +288,7 @@ MNQ_RSI_TL = StrategyConfig(
     partial_tp_pts=7,               # TP1 scalp
     partial_qty=1,
     move_sl_to_be_after_tp1=True,
-    max_strategy_daily_loss=200.0,
+    max_strategy_daily_loss=350.0,   # 2ct × SL=35 = $144. Allows 2 full SLs + recovery.
     session_start_et="09:30",       # Match backtest (9:30 AM, not 10:00 default)
     session_end_et="13:00",
     session_close_et="16:00",
