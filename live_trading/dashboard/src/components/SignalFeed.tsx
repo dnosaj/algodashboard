@@ -37,7 +37,11 @@ function shortBlockReason(reason: string): string {
   if (reason.includes('ATR') || reason.includes('atr')) return 'ATR GATE';
   if (reason.includes('daily loss')) return 'DAILY LOSS';
   if (reason.includes('cooldown')) return 'COOLDOWN';
-  return 'BLOCKED';
+  if (reason.includes('Consecutive') || reason.includes('consecutive')) return 'CONSEC LOSS';
+  if (reason.includes('halted') || reason.includes('HALTED')) return 'ENGINE HALTED';
+  if (reason.includes('position') || reason.includes('max_position')) return 'MAX POSITION';
+  if (reason.includes('paused') || reason.includes('Auto:')) return 'STRATEGY PAUSED';
+  return reason.length > 20 ? reason.substring(0, 18) + '…' : (reason || 'BLOCKED');
 }
 
 function getSignalLabel(type: string): string {

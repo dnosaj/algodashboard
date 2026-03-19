@@ -376,6 +376,8 @@ class EventBridge:
             "price": payload["price"],
             "time": int(ts.timestamp()) + offset_seconds,
             "reason": payload["reason"],
+            "sm_value": payload.get("sm_value", 0),
+            "rsi_value": payload.get("rsi_value", 0),
         })
 
     def _on_fill(self, fill: dict) -> None:
