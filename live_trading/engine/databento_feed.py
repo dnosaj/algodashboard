@@ -458,9 +458,12 @@ class DabentoDataFeed:
                 # Register callback for all record types
                 self._live_client.add_callback(self._on_record)
 
+                # Start the live session (begins receiving data)
+                self._live_client.start()
+
                 retry_count = 0  # Reset on successful connection
                 logger.info(
-                    f"[DB Feed] Live stream connected "
+                    f"[DB Feed] Live stream connected and started "
                     f"(symbols: {self._db_symbols})"
                 )
 
@@ -500,6 +503,7 @@ class DabentoDataFeed:
             return
 
         try:
+            record_type = type(record).__name__
             if isinstance(record, db.SymbolMappingMsg):
                 self._on_symbol_mapping(record)
             elif isinstance(record, db.OHLCVMsg):
@@ -508,14 +512,21 @@ class DabentoDataFeed:
                 self._on_quote(record)
             elif isinstance(record, db.ErrorMsg):
                 logger.error(f"[DB Feed] Databento error: {record.err}")
+            elif record_type not in ('SystemMsg',):
+                logger.debug(f"[DB Feed] Unhandled record type: {record_type}")
         except Exception as e:
-            logger.warning(f"[DB Feed] Error processing record: {e}")
+            logger.warning(f"[DB Feed] Error processing {type(record).__name__}: {e}", exc_info=True)
 
     def _on_symbol_mapping(self, msg: Any) -> None:
         """Process SymbolMappingMsg: map instrument_id to instrument name."""
-        instrument_id = msg.hd.instrument_id
+        instrument_id = getattr(msg, 'instrument_id', None)
+        if instrument_id is None:
+            instrument_id = getattr(getattr(msg, 'hd', None), 'instrument_id', None)
+        if instrument_id is None:
+            logger.warning(f"[DB Feed] SymbolMappingMsg has no instrument_id: {dir(msg)}")
+            return
         # stype_in_symbol is the continuous symbol we subscribed with (e.g. "MNQ.c.0")
-        in_symbol = msg.stype_in_symbol
+        in_symbol = getattr(msg, 'stype_in_symbol', '')
 
         instrument = REVERSE_SYMBOL_MAP.get(in_symbol)
         if instrument:
