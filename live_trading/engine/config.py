@@ -102,6 +102,7 @@ class EngineConfig:
     webull: WebullConfig = field(default_factory=WebullConfig)
     tastytrade: TastytradeConfig = field(default_factory=TastytradeConfig)
     broker: str = "mock"         # "mock", "tastytrade", or "webull"
+    data_feed: str = "auto"      # "auto", "databento", or "tastytrade"
     api_host: str = "0.0.0.0"
     api_port: int = 8000
     warmup_bars: int = 500  # Historical bars to load for SM warmup

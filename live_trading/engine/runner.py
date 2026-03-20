@@ -1554,13 +1554,17 @@ async def run(config: EngineConfig) -> None:
     logger.info(f"  Advisors loaded: {[a.name for a in state.advisors]}")
 
     # --- 3. Initialize data feed + order manager ---
+    # Data feed and broker are independent:
+    #   - data_feed: "databento" (CME direct), "tastytrade" (DXLink), or mock
+    #   - broker: "tastytrade" (real orders) or "mock" (simulated fills)
     instruments = list(dict.fromkeys(s.instrument for s in config.strategies))
+    use_databento = getattr(config, 'data_feed', '') == 'databento'
 
+    # --- 3a. Initialize order manager (broker) ---
     if config.broker == "tastytrade":
-        from engine.tastytrade_feed import TastytradeDataFeed
         from tastytrade import Session
 
-        # Authenticate with tastytrade for market data
+        # Authenticate with tastytrade (needed for orders, and for TT data feed)
         logger.info("  Connecting to tastytrade...")
         tt_session = Session(
             config.tastytrade.client_secret,
@@ -1575,7 +1579,46 @@ async def run(config: EngineConfig) -> None:
             lg.handlers.clear()
 
         if config.safety.paper_mode:
-            # PAPER MODE: real data from tastytrade, mock order fills
+            order_manager = MockOrderManager()
+            await order_manager.connect()
+            state.order_manager = order_manager
+            logger.info("  Broker: tastytrade PAPER (mock fills)")
+        else:
+            # LIVE MODE: real orders via tastytrade
+            from engine.tastytrade_broker import TastytradeBroker
+
+            strat_map = {(s.strategy_id or s.instrument): s for s in config.strategies}
+            order_manager = TastytradeBroker(config.tastytrade, strat_map)
+            ok = await order_manager.connect()
+            if not ok:
+                logger.error("[Runner] tastytrade connection failed, aborting")
+                return
+            state.order_manager = order_manager
+            logger.info("  Broker: tastytrade LIVE (real orders!)")
+    else:
+        order_manager = MockOrderManager()
+        await order_manager.connect()
+        state.order_manager = order_manager
+        logger.info("  Broker: mock (paper mode)")
+
+    # --- 3b. Initialize data feed ---
+    if use_databento:
+        # Databento CME direct feed (primary, independent of dxFeed)
+        from engine.databento_feed import DabentoDataFeed
+
+        data_feed = DabentoDataFeed(
+            instruments=instruments,
+            warmup_bars=config.warmup_bars,
+        )
+        await data_feed.connect()
+        state.data_feed = data_feed
+        logger.info("  Data feed: Databento GLBX.MDP3 (CME direct)")
+
+    elif config.broker == "tastytrade":
+        # tastytrade DXLink data feed (legacy)
+        from engine.tastytrade_feed import TastytradeDataFeed
+
+        if config.safety.paper_mode:
             # Resolve contract symbols for data feed
             from tastytrade.instruments import Future
             contract_symbols = {}
@@ -1594,47 +1637,23 @@ async def run(config: EngineConfig) -> None:
                 contract_symbols=contract_symbols,
                 warmup_bars=config.warmup_bars,
             )
-            await data_feed.connect()
-            state.data_feed = data_feed
-
-            order_manager = MockOrderManager()
-            await order_manager.connect()
-            state.order_manager = order_manager
-
-            logger.info("  Broker: tastytrade PAPER (real data, mock fills)")
         else:
-            # LIVE MODE: real data + real orders via tastytrade
-            from engine.tastytrade_broker import TastytradeBroker
-
-            strat_map = {(s.strategy_id or s.instrument): s for s in config.strategies}
-            order_manager = TastytradeBroker(config.tastytrade, strat_map)
-            ok = await order_manager.connect()
-            if not ok:
-                logger.error("[Runner] tastytrade connection failed, aborting")
-                return
-            state.order_manager = order_manager
-
             data_feed = TastytradeDataFeed(
-                session=order_manager._session,
+                session=state.order_manager._session,
                 instruments=instruments,
-                contract_symbols=order_manager.get_contract_symbols(),
+                contract_symbols=state.order_manager.get_contract_symbols(),
                 warmup_bars=config.warmup_bars,
             )
-            await data_feed.connect()
-            state.data_feed = data_feed
+        await data_feed.connect()
+        state.data_feed = data_feed
+        logger.info("  Data feed: tastytrade DXLink")
 
-            logger.info("  Broker: tastytrade LIVE (real orders!)")
     else:
-        # Mock data feed + order manager (paper trading / testing)
+        # Mock data feed (paper trading / testing)
         data_feed = MockDataFeed(instruments)
         await data_feed.connect()
         state.data_feed = data_feed
-
-        order_manager = MockOrderManager()
-        await order_manager.connect()
-        state.order_manager = order_manager
-
-        logger.info("  Broker: mock (paper mode)")
+        logger.info("  Data feed: mock")
 
     # --- 5. Initialize safety manager ---
     safety = SafetyManager(config, event_bus=event_bus)

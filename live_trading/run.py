@@ -5,6 +5,8 @@ Usage:
     python run.py                              # Default: mock (paper), MNQ+MES
     python run.py --broker tastytrade          # tastytrade sandbox (reads .env)
     python run.py --broker tastytrade --live   # tastytrade PRODUCTION
+    python run.py --feed databento             # Databento CME direct data feed
+    python run.py --feed databento --broker tastytrade  # Databento data + TT orders
     python run.py --instruments MNQ            # MNQ only
     python run.py --port 9000                  # Custom API port
 """
@@ -79,6 +81,15 @@ def parse_args() -> argparse.Namespace:
         help="Comma-separated instrument list (e.g., MNQ,MES or MNQ)",
     )
     parser.add_argument(
+        "--feed",
+        type=str,
+        default="auto",
+        choices=["auto", "databento", "tastytrade"],
+        help="Data feed: 'auto' uses Databento if DATABENTO_API_KEY set, "
+             "else tastytrade. 'databento' for Databento CME direct. "
+             "'tastytrade' for DXLink (legacy).",
+    )
+    parser.add_argument(
         "--port",
         type=int,
         default=8000,
@@ -115,12 +126,23 @@ def build_config(args: argparse.Namespace) -> EngineConfig:
         is_sandbox=False,  # Always use production API (paper mode uses mock fills, not sandbox)
     )
 
+    # Resolve data feed: "auto" picks Databento if API key is set
+    feed = args.feed
+    if feed == "auto":
+        if os.environ.get("DATABENTO_API_KEY"):
+            feed = "databento"
+        elif args.broker == "tastytrade":
+            feed = "tastytrade"
+        else:
+            feed = "tastytrade"  # fallback (mock broker still uses TT for data)
+
     config = replace(
         DEFAULT_CONFIG,
         strategies=strategies,
         safety=replace(DEFAULT_CONFIG.safety, paper_mode=paper_mode),
         tastytrade=tt_config,
         broker=args.broker,
+        data_feed=feed,
         api_port=args.port,
     )
 
@@ -150,6 +172,7 @@ def main() -> None:
             sys.exit(1)
     else:
         print(f"  Mode:        PAPER (mock)")
+    print(f"  Data feed:   {config.data_feed}")
     print(f"  Strategies:  {[(s.strategy_id or s.instrument) for s in config.strategies]}")
     print(f"  API port:    {config.api_port}")
     print()
