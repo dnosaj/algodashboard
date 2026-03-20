@@ -303,8 +303,10 @@ class DabentoDataFeed:
         )
 
         # Request extra bars to account for gaps (weekends, holidays, maintenance)
+        # Databento historical has ~30min delay, so end 45min ago to avoid
+        # "data_end_after_available_end" errors. Live stream fills the gap.
         request_minutes = int(self._warmup_count * 2.5)
-        end_time = datetime.now(timezone.utc)
+        end_time = datetime.now(timezone.utc) - timedelta(minutes=45)
         start_time = end_time - timedelta(minutes=request_minutes)
 
         try:
