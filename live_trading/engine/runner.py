@@ -1420,7 +1420,14 @@ def _build_engine_handle(state: EngineState) -> EngineHandle:
         for strat in state.strategies.values():
             strat._entry_qty_override = None
             strat._partial_qty_override = None
+        # Re-enable trading and clear flatten reason (fixes heartbeat re-flatten loop)
+        state.trading_active = True
+        state._flatten_reason = ""
+        # Reset heartbeat timestamps so heartbeat doesn't immediately re-flatten
         if state.safety:
+            now = datetime.now(timezone.utc)
+            for inst in state.safety._last_bar_time:
+                state.safety._last_bar_time[inst] = now
             return state.safety.force_resume_all()
         return False, "Safety manager not initialized"
 
