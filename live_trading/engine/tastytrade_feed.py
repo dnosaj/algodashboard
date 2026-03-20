@@ -245,7 +245,7 @@ class TastytradeDataFeed:
         the intra-bar exit monitor with real-time bid/ask prices.
         """
         retry_count = 0
-        max_retries = 10
+        max_retries = 999  # Retry indefinitely — dxFeed outages can last hours
 
         while self._connected and retry_count < max_retries:
             try:
@@ -301,11 +301,22 @@ class TastytradeDataFeed:
             self._connected = False
 
     async def _candle_listen(self, streamer: "DXLinkStreamer") -> None:
-        """Listen for candle events from the streamer."""
-        async for candle in streamer.listen(Candle):
-            if not self._connected:
+        """Listen for candle events from the streamer.
+
+        Includes a 120s inactivity timeout — if no candle arrives in 2 minutes,
+        assume the stream is dead and raise to trigger reconnection.
+        This handles the case where DXLink says 'connected' but stops delivering data.
+        """
+        candle_iter = streamer.listen(Candle).__aiter__()
+        while self._connected:
+            try:
+                candle = await asyncio.wait_for(candle_iter.__anext__(), timeout=120.0)
+                self._process_candle(candle)
+            except asyncio.TimeoutError:
+                logger.warning("[TT Feed] No candle received in 120s — stream appears dead, forcing reconnect")
+                raise ConnectionError("Candle stream silent for 120s")
+            except StopAsyncIteration:
                 break
-            self._process_candle(candle)
 
     async def _quote_listen(self, streamer: "DXLinkStreamer") -> None:
         """Listen for quote events and push to the quote queue."""
