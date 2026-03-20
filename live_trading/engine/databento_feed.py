@@ -303,10 +303,34 @@ class DabentoDataFeed:
         )
 
         # Request extra bars to account for gaps (weekends, holidays, maintenance)
-        # Databento historical has ~30min delay, so end 45min ago to avoid
-        # "data_end_after_available_end" errors. Live stream fills the gap.
+        # Databento historical has ~30min delay. Try "now", catch the error,
+        # fall back to progressively earlier end times.
         request_minutes = int(self._warmup_count * 2.5)
-        end_time = datetime.now(timezone.utc) - timedelta(minutes=45)
+        end_time = None
+        for offset_minutes in [0, 15, 30, 45, 60, 90]:
+            try:
+                candidate = datetime.now(timezone.utc) - timedelta(minutes=offset_minutes)
+                hist_client = db.Historical(self._api_key)
+                # Quick cost check to see if this end time is valid
+                hist_client.metadata.get_cost(
+                    dataset="GLBX.MDP3",
+                    symbols=self._db_symbols[:1],
+                    schema="ohlcv-1m",
+                    stype_in="continuous",
+                    start=(candidate - timedelta(minutes=5)).strftime("%Y-%m-%dT%H:%M"),
+                    end=candidate.strftime("%Y-%m-%dT%H:%M"),
+                )
+                end_time = candidate
+                if offset_minutes > 0:
+                    logger.info(f"[DB Feed] Historical data available up to {offset_minutes}min ago")
+                break
+            except Exception:
+                continue
+
+        if end_time is None:
+            logger.warning("[DB Feed] Could not determine available historical range, using 90min offset")
+            end_time = datetime.now(timezone.utc) - timedelta(minutes=90)
+
         start_time = end_time - timedelta(minutes=request_minutes)
 
         try:
@@ -442,11 +466,17 @@ class DabentoDataFeed:
                 self._live_client = db.Live(key=self._api_key)
 
                 # Subscribe to 1-min OHLCV bars
+                # Use start= to backfill from warmup end, closing any gap
+                # between historical fetch and live stream
+                lookback_start = datetime.now(timezone.utc) - timedelta(
+                    minutes=int(self._warmup_count * 2.5)
+                )
                 self._live_client.subscribe(
                     dataset="GLBX.MDP3",
                     schema="ohlcv-1m",
                     stype_in="continuous",
                     symbols=self._db_symbols,
+                    start=lookback_start,
                 )
 
                 # Subscribe to top-of-book quotes (MBP-1) for intra-bar exits
